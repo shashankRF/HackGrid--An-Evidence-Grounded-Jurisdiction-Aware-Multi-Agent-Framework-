@@ -590,7 +590,7 @@ function escapeHtml(s){
 
 async function apiFetch(endpoint, options){
   options = options || {};
-  var timeoutMs = options.timeout !== undefined ? options.timeout : (endpoint.indexOf('/query') !== -1 || endpoint.indexOf('/run') !== -1 ? 60000 : 10000);
+  var timeoutMs = options.timeout !== undefined ? options.timeout : (endpoint.indexOf('/query') !== -1 || endpoint.indexOf('/run') !== -1 ? 180000 : 10000);
   var controller = new AbortController();
   var timer;
   if (timeoutMs > 0 && !options.signal) {
@@ -603,7 +603,7 @@ async function apiFetch(endpoint, options){
     res = await fetch(url, options);
   } catch(err) {
     if (err.name === 'AbortError' || (controller && controller.signal.aborted)) {
-      var abortErr = new Error('Request timed out after ' + (timeoutMs / 1000) + 's');
+      var abortErr = new Error('Request timed out after ' + (timeoutMs / 1000) + 's. Deep multi-stage compliance analysis in progress.');
       abortErr.name = 'AbortError';
       throw abortErr;
     }

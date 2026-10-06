@@ -29,7 +29,7 @@ GROQ_MODEL = "openai/gpt-oss-120b"
 # Keep the classifier conservative.
 CLASSIFIER_TEMPERATURE = 0.2
 CLASSIFIER_MAX_TOKENS = 2500
-CLASSIFIER_REASONING_EFFORT = "medium"
+CLASSIFIER_REASONING_EFFORT = "low"
 
 
 # ============================================================

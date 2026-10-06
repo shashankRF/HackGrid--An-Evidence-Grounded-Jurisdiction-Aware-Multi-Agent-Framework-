@@ -167,6 +167,15 @@ def _merge_evidence(
 # FULL HACKGRID PIPELINE
 # ============================================================
 
+_cached_ranking_pipeline = None
+
+def get_ranking_pipeline() -> EvidenceRankingPipeline:
+    global _cached_ranking_pipeline
+    if _cached_ranking_pipeline is None:
+        _cached_ranking_pipeline = EvidenceRankingPipeline()
+    return _cached_ranking_pipeline
+
+
 def run_pipeline(
     question,
     jurisdiction="India",
@@ -221,7 +230,7 @@ def run_pipeline(
 
     print("=" * 80)
     print(
-        "HACKGRID — FULL EVIDENCE-AWARE PIPELINE"
+        "HACKGRID -- FULL EVIDENCE-AWARE PIPELINE"
     )
     print("=" * 80)
 
@@ -235,7 +244,7 @@ def run_pipeline(
 
     results = retrieve(
         question,
-        k=40,
+        k=20,
         jurisdiction=jurisdiction,
     )
 
@@ -258,9 +267,7 @@ def run_pipeline(
         "\n[1B/9] Top-K reranking + evidence analysis..."
     )
 
-    evidence_ranking_pipeline = (
-        EvidenceRankingPipeline()
-    )
+    evidence_ranking_pipeline = get_ranking_pipeline()
 
     ranking_result = (
         evidence_ranking_pipeline.run(
@@ -300,7 +307,7 @@ def run_pipeline(
 
     counter_results = retrieve(
         counter_evidence_query,
-        k=40,
+        k=20,
         jurisdiction=jurisdiction,
     )
 
@@ -461,8 +468,10 @@ def run_pipeline(
         evidence_classification.get("status")
         != "SUCCESS"
     ):
+        err_msg = evidence_classification.get("error") or evidence_classification.get("status")
+        print(f"Evidence classification failed: {err_msg}")
         raise RuntimeError(
-            "Evidence classification failed."
+            f"Evidence classification failed: {err_msg}"
         )
 
     validation = (
@@ -674,11 +683,11 @@ def run_pipeline(
     )
 
     # ========================================================
-    # 8. CLAIM → EVIDENCE MAPPINGS
+    # 8. CLAIM -> EVIDENCE MAPPINGS
     # ========================================================
 
     print(
-        "\n[8/9] Building claim → evidence mappings..."
+        "\n[8/9] Building claim -> evidence mappings..."
     )
 
     mappings = []
