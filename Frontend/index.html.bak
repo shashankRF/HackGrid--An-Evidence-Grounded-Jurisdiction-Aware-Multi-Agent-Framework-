@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HackGrid</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#fafafa;--muted:#a7a6a6;--nav:#b6b5b5;--strip:#8b8a8a;--pill:#fff;--pill-ink:#050505;
+  --u:calc(100vh/1058);--uw:calc(100vw/1487);
+  --h:clamp(var(--u),calc(var(--u)*.65 + var(--uw)*.35),calc(var(--u)*1.16));
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+@supports (height:100dvh){:root{--u:calc(100dvh/1058)}.stage{height:100dvh}}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}html,body{background:#050505}body{overflow-x:hidden}
+body{font-family:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+a{color:inherit;text-decoration:none}
+ul{list-style:none}
+.stage{position:relative;width:100%;height:100vh;overflow:hidden;background:#050505}
+.plate{position:absolute;inset:0}
+.plate-video{position:absolute;left:50%;top:calc(1*var(--u));width:calc(1492*var(--u));height:calc(1054*var(--u));transform:translateX(calc(-50% - .5*var(--u)));object-fit:cover;pointer-events:none}
+.plate::after{content:"";position:absolute;inset:0;pointer-events:none;background:
+linear-gradient(to bottom,rgba(5,5,5,0) 78.8%,rgba(5,5,5,.23) 79.6%,rgba(5,5,5,.45) 81.4%,rgba(5,5,5,.75) 83.3%,rgba(5,5,5,.84) 85.2%,rgba(5,5,5,.888) 88%,rgba(5,5,5,.905) 91%,rgba(5,5,5,.96) 95%,#050505 100%),
+linear-gradient(to right,#050505 calc(50% - 746*var(--u)),transparent calc(50% - 676*var(--u)),transparent calc(50% + 676*var(--u)),#050505 calc(50% + 746*var(--u)))}
+.topbar{position:fixed;inset:0 0 auto 0;height:0;z-index:20}
+.brand{position:absolute;left:calc(75*var(--u));top:calc(27*var(--u));width:calc(31.5*var(--u));height:calc(48.5*var(--u))}
+.brand svg{display:block;width:100%;height:100%}
+.links{position:absolute;left:50%;top:calc(51*var(--u));transform:translate(-50%,-50%);display:flex;white-space:nowrap;font-size:calc(19*var(--u));font-weight:400;color:var(--nav)}
+.links a+a{margin-left:calc(24.5*var(--u))}
+.links a:hover{color:#fff}
+.pill{display:flex;align-items:center;justify-content:center;background:var(--pill);color:var(--pill-ink);border-radius:999px;font-weight:500;white-space:nowrap}
+.pill-nav{position:absolute;right:calc(75.4*var(--u));top:calc(27*var(--u));width:calc(175*var(--u));height:calc(49*var(--u));font-size:calc(20.6*var(--u))}
+.pill-nav span{transform:translateY(calc(1*var(--u)))}
+.burger{display:none}
+.menu{display:none}
+.hero{position:absolute;inset:0;z-index:3}
+.headline{position:absolute;left:calc(75.5*var(--u));top:calc(230.5*var(--u));font-size:calc(71.6*var(--h));line-height:calc(80.5*var(--h));font-weight:400;letter-spacing:calc(.3*var(--h));color:var(--ink);white-space:nowrap}
+.headline span,.sub span{display:block}
+.sub{position:absolute;left:calc(75.5*var(--u));top:calc(230.5*var(--u) + 108.5*var(--h));font-size:calc(20.7*var(--h));line-height:calc(23.5*var(--h));font-weight:400;word-spacing:calc(1.8*var(--h));color:var(--muted);white-space:nowrap}
+.pill-cta{position:absolute;left:calc(74.9*var(--u));top:calc(230.5*var(--u) + 184*var(--h));width:calc(175.6*var(--h));height:calc(50*var(--h));font-size:calc(20.6*var(--h))}
+.ghost{position:absolute;left:calc(74.9*var(--u) + 220.6*var(--h));top:calc(230.5*var(--u) + 199*var(--h));font-size:calc(20.6*var(--h));font-weight:500;letter-spacing:calc(.12*var(--h));color:#fff;white-space:nowrap}
+.ghost:hover{opacity:.75}
+.actions{display:contents}
+.logos{position:absolute;left:50%;top:0;width:calc(741*var(--u));height:0;transform:translateX(calc(-50% + 20*var(--u)));color:var(--strip);z-index:3}
+.lg{position:absolute;display:block;font-family:'IpsumMark','Manrope',sans-serif;font-weight:700}
+.lg svg{position:absolute;left:0;top:0;display:block}
+.lg b{position:absolute;font-weight:700;white-space:nowrap;line-height:1}
+.lg1{left:calc(-.5*var(--u));top:calc(994.7*var(--u))}.lg1 svg{width:calc(30.5*var(--u));height:calc(31*var(--u))}.lg1 b{left:calc(37*var(--u));top:calc(5.6*var(--u));font-size:calc(18.1*var(--u))}
+.lg2{left:calc(206.5*var(--u));top:calc(995.7*var(--u))}.lg2 svg{width:calc(24.5*var(--u));height:calc(30*var(--u))}.lg2 b{left:calc(31*var(--u));top:calc(7.3*var(--u));font-size:calc(18.5*var(--u))}
+.lg3{left:calc(416.5*var(--u));top:calc(996.7*var(--u))}.lg3 svg{width:calc(28.5*var(--u));height:calc(28*var(--u))}.lg3 b{left:calc(35*var(--u));top:calc(7.3*var(--u));font-size:calc(16.15*var(--u))}
+.lg4{left:calc(620.5*var(--u));top:calc(998.7*var(--u))}.lg4 svg{width:calc(28.5*var(--u));height:calc(25.5*var(--u))}.lg4 b{left:calc(37*var(--u));top:calc(8.3*var(--u));font-size:calc(15.3*var(--u))}
+.dot{display:inline-block;width:.09em;height:.09em;border-radius:50%;background:currentColor;vertical-align:.62em;margin-left:.06em}
+
+@media (prefers-reduced-motion:no-preference){
+  @keyframes rise{from{opacity:0;transform:translateY(calc(14*var(--u)))}}
+  @keyframes riseNav{from{opacity:0;transform:translate(-50%,calc(-50% + 14*var(--u)))}to{opacity:1;transform:translate(-50%,-50%)}}
+  @keyframes fade{from{opacity:0}}
+  .brand,.pill-nav{animation:rise .8s var(--ease) both}
+  .links{animation:riseNav .8s var(--ease) both}
+  .headline{animation:rise .9s var(--ease) .06s both}
+  .sub{animation:rise .9s var(--ease) .14s both}
+  .pill-cta,.ghost{animation:rise .9s var(--ease) .22s both}
+  .lg{animation:fade 1.1s ease .34s both}
+}
+
+/* ---------- Portrait / narrow ---------- */
+@media (max-aspect-ratio:11/10){
+  :root{--m:min(100vw/430,1.34px);--u:var(--m);--h:var(--m)}
+  .stage{display:flex;flex-direction:column;padding:calc(76*var(--m) + env(safe-area-inset-top)) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  .plate-video{inset:0;left:0;top:0;width:100%;height:100%;transform:none;object-position:43% center}
+  .plate::after{background:
+    linear-gradient(to right,rgba(5,5,5,.86),rgba(5,5,5,.66) 42%,rgba(5,5,5,.2) 78%,rgba(5,5,5,.1)),
+    linear-gradient(to bottom,rgba(5,5,5,.72) 0%,rgba(5,5,5,.34) 24%,rgba(5,5,5,.34) 56%,rgba(5,5,5,.8) 82%,rgba(5,5,5,.97) 94%,#050505)}
+  .topbar{height:0}
+  .brand{left:calc(24*var(--m));top:calc(20*var(--m));width:calc(26*var(--m));height:calc(40*var(--m))}
+  .links,.pill-nav{display:none}
+  .burger{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:calc(5.6*var(--m));position:absolute;right:calc(20*var(--m));top:calc(20*var(--m));width:calc(48*var(--m));height:calc(40*var(--m));border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer;z-index:12}
+  .burger i{display:block;width:calc(18*var(--m));height:1.5px;background:#fff;transition:transform .42s var(--ease)}
+  .is-open .burger i:first-child{transform:translateY(calc(3.55*var(--m))) rotate(45deg)}
+  .is-open .burger i:last-child{transform:translateY(calc(-3.55*var(--m))) rotate(-45deg)}
+  .menu{display:block;position:fixed;inset:0;z-index:10;background:linear-gradient(180deg,rgba(5,5,5,.94),rgba(5,5,5,.99));-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);opacity:0;visibility:hidden;transition:opacity .42s ease,visibility .42s}
+  .is-open .menu{opacity:1;visibility:visible}
+  .menu-inner{height:100%;display:flex;flex-direction:column;justify-content:center;padding:calc(90*var(--m)) calc(28*var(--m)) calc(40*var(--m))}
+  .menu-eyebrow{font-size:calc(14*var(--m));color:var(--muted);margin-bottom:calc(18*var(--m))}
+  .menu-list a{display:flex;justify-content:space-between;align-items:center;font-size:max(25px,calc(31*var(--m)));padding:calc(9*var(--m)) 0;color:var(--ink)}
+  .menu-list a::after{content:"";width:.28em;height:.28em;border-top:2px solid var(--muted);border-right:2px solid var(--muted);transform:rotate(45deg)}
+  .menu-foot{display:flex;flex-direction:column;gap:calc(16*var(--m));margin-top:calc(34*var(--m));align-items:flex-start}
+  .menu-foot .pill{width:calc(176*var(--m));height:calc(50*var(--m));font-size:calc(20*var(--m))}
+  .menu-foot .ghost{position:static;font-size:calc(20*var(--m))}
+  .menu-eyebrow,.menu-list li,.menu-foot{opacity:0;transform:translateY(calc(12*var(--m)));transition:opacity .5s var(--ease),transform .5s var(--ease)}
+  .is-open .menu-eyebrow{opacity:1;transform:none;transition-delay:.06s}
+  .is-open .menu-list li{opacity:1;transform:none}
+  .is-open .menu-list li:nth-child(1){transition-delay:.10s}.is-open .menu-list li:nth-child(2){transition-delay:.16s}
+  .is-open .menu-list li:nth-child(3){transition-delay:.22s}.is-open .menu-list li:nth-child(4){transition-delay:.28s}.is-open .menu-list li:nth-child(5){transition-delay:.34s}.is-open .menu-list li:nth-child(6){transition-delay:.40s}.is-open .menu-list li:nth-child(7){transition-delay:.46s}
+  .is-open .menu-foot{opacity:1;transform:none;transition-delay:.52s}
+  .hero{position:relative;inset:auto;flex:1;z-index:3;display:flex;flex-direction:column;justify-content:center;padding:0 calc(24*var(--m))}
+  .headline,.sub,.pill-cta,.ghost{position:static;animation-name:rise}
+  .headline{font-size:calc(46*var(--m));line-height:calc(52*var(--m));white-space:normal;letter-spacing:calc(.2*var(--m))}
+  .headline span,.sub span{display:inline}
+  .sub{font-size:calc(17*var(--m));line-height:calc(24*var(--m));white-space:normal;word-spacing:normal;margin-top:calc(22*var(--m));max-width:calc(340*var(--m))}
+  .actions{display:flex;align-items:center;gap:calc(22*var(--m));margin-top:calc(30*var(--m))}
+  .pill-cta{width:calc(176*var(--m));height:calc(50*var(--m));font-size:calc(20*var(--m))}
+  .ghost{font-size:calc(18*var(--m))}
+  .logos{position:relative;left:auto;top:auto;width:100%;height:auto;transform:none;flex:none;display:grid;grid-template-columns:1fr 1fr;gap:calc(26*var(--m)) calc(10*var(--m));padding:calc(20*var(--m)) calc(28*var(--m)) calc(34*var(--m))}
+  .lg{position:relative;left:auto!important;top:auto!important;height:calc(32*var(--m))}
+  .lg svg{transform:scale(1);transform-origin:left top}
+  .lg1 svg,.lg2 svg,.lg3 svg,.lg4 svg{width:calc(28*var(--m));height:calc(28*var(--m))}
+  .lg b{left:calc(36*var(--m))!important;top:calc(6*var(--m))!important;font-size:calc(17*var(--m))!important}
+}
+@media (min-width:600px) and (max-aspect-ratio:11/10){
+  :root{--m:min(100vw/860,100vh/760,1.25px)}
+  .plate-video{object-position:44% center}
+  .headline span,.sub span{display:block}
+  .logos{display:flex;justify-content:space-between}
+}
+
+/* ---------- Hero evidence strip (replaces placeholder logos) ---------- */
+.logos span{font-size:calc(15*var(--u));letter-spacing:.14em;font-weight:500}
+@media not all and (max-aspect-ratio:11/10){.logos{top:calc(1003*var(--u));height:auto;display:flex;justify-content:space-between}}
+@media (max-aspect-ratio:11/10){.logos span{font-size:14px}}
+/* ---------- Story ---------- */
+:root{--line:rgba(255,255,255,.13)}
+.story{position:relative;background:#050505;z-index:1}
+.sec{max-width:1180px;margin:0 auto;padding:clamp(72px,13vh,150px) clamp(24px,5vw,75px);border-top:1px solid var(--line)}
+.k{display:flex;gap:14px;font-size:14px;color:var(--strip);margin-bottom:20px}
+.sec h2{font-weight:400;font-size:clamp(32px,4.6vw,66px);line-height:1.08;max-width:16em;margin-bottom:28px;letter-spacing:.2px}
+.lead{color:var(--muted);font-size:clamp(16px,1.35vw,20px);line-height:1.6;max-width:44em}
+.note{display:inline-block;margin-top:28px;font-size:13px;color:var(--strip);border:1px solid var(--line);border-radius:999px;padding:6px 14px}
+.flow{list-style:none;display:flex;flex-wrap:wrap;gap:10px 0;margin-top:40px}
+.flow li{font-size:14px;color:var(--nav)}.flow li+li::before{content:"→";margin:0 12px;color:var(--strip)}
+.rows{margin-top:36px}
+.rows>div{display:grid;grid-template-columns:minmax(140px,.7fr) 3fr;gap:10px 32px;padding:22px 0;border-top:1px solid var(--line)}
+.rows b{font-weight:500;font-size:clamp(18px,1.6vw,24px)}
+.rows p{color:var(--muted);line-height:1.55;margin-bottom:6px}.rows i{font-style:normal;color:var(--strip);display:inline-block;min-width:5.4em;font-size:13px}
+.stack{margin-top:40px;display:grid;gap:0;max-width:640px}
+.stack div{border:1px solid var(--line);padding:22px 26px;font-size:clamp(18px,1.8vw,26px)}
+.stack div span{display:block;font-size:14px;color:var(--strip);margin-top:6px}
+.stack em{font-style:normal;color:var(--strip);text-align:center;padding:8px}
+.quote{font-size:clamp(22px,2.6vw,38px);margin-top:48px;line-height:1.25;max-width:20em}
+.pipe{list-style:none;margin-top:40px;border-left:1px solid var(--line)}
+.pipe li{position:relative;padding:0 0 30px 32px;opacity:.3;transition:opacity .8s var(--ease)}
+.pipe li::before{content:"";position:absolute;left:-4px;top:8px;width:7px;height:7px;border-radius:50%;background:var(--strip);transition:background .8s}
+.pipe li.in{opacity:1}.pipe li.in::before{background:#fff}
+.pipe b{display:block;font-weight:500;font-size:clamp(18px,1.7vw,24px)}.pipe span{color:var(--muted);line-height:1.5}
+.dia{width:100%;max-width:700px;margin-top:40px;display:block}
+.dia text{fill:var(--ink);font-size:15px;text-anchor:middle;font-family:inherit}.dia path{stroke:var(--strip);fill:none;stroke-width:1}
+.tabs{display:flex;flex-wrap:wrap;gap:10px;margin:36px 0 0}
+.tabs button,.btn{font:inherit;font-size:15px;color:var(--ink);background:none;border:1px solid var(--line);border-radius:999px;padding:10px 20px;cursor:pointer}
+.tabs button[aria-selected=true]{background:#fff;color:#050505}
+.tabs button:focus-visible,.btn:focus-visible,summary:focus-visible,textarea:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.panel{margin-top:28px;padding-top:24px;border-top:1px solid var(--line);color:var(--muted);line-height:1.6;max-width:46em}
+.panel strong{color:var(--ink);font-weight:500}
+.cmp{display:grid;grid-template-columns:1fr 1fr;margin-top:40px;border-top:1px solid var(--line)}
+.cmp>div{padding:24px 28px 24px 0}.cmp>div+div{padding-left:28px;border-left:1px solid var(--line)}
+.cmp small{display:block;font-size:13px;color:var(--strip);margin-bottom:10px}.cmp p{color:var(--muted);line-height:1.55;margin-top:8px}
+.verdict{border-top:1px solid var(--line);padding:26px 0;display:grid;grid-template-columns:1fr 1fr;gap:20px 28px}
+.verdict h3{font-weight:400;font-size:clamp(26px,3vw,44px);grid-column:1/-1}.verdict p{color:var(--muted);line-height:1.55}.verdict i{font-style:normal;display:block;color:var(--strip);font-size:13px;margin-bottom:4px}
+.big{font-size:clamp(24px,3vw,44px);line-height:1.2;margin-top:44px;max-width:18em}
+textarea{width:100%;min-height:96px;margin-top:32px;font:inherit;font-size:clamp(17px,1.6vw,22px);line-height:1.45;color:var(--ink);background:transparent;border:0;border-bottom:1px solid var(--strip);padding:10px 0;resize:vertical}
+.btn.pri{background:#fff;color:#050505;font-weight:500;margin-top:20px}
+.res{margin-top:36px}.res[hidden]{display:none}
+details{border-top:1px solid var(--line);padding:16px 0;color:var(--muted);line-height:1.55}summary{cursor:pointer;color:var(--ink)}
+.dec{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}#decision{margin-top:16px;color:var(--muted);min-height:1.5em}
+.kb{display:flex;flex-wrap:wrap;gap:6px 36px;margin-top:40px;font-size:clamp(26px,3.6vw,52px);line-height:1.25}
+.kb span{color:var(--nav)}
+.foot{max-width:1180px;margin:0 auto;padding:60px clamp(24px,5vw,75px) 80px;border-top:1px solid var(--line);color:var(--strip);font-size:14px;line-height:1.6}
+.cta-mail{display:inline-block;font-size:clamp(17px,1.5vw,20px);padding:16px 38px;margin-top:32px}.cta-mail:hover{opacity:.85}
+.mail{margin-top:16px;color:var(--strip);font-size:14px}
+body.inner .topbar::before{content:"";position:absolute;left:0;right:0;top:0;height:calc(100*var(--u));background:linear-gradient(#050505 55%,transparent);pointer-events:none}
+@media (max-aspect-ratio:11/10){body.inner .topbar::before{height:calc(78*var(--m))}}
+body.inner .story{padding-top:84px}.sec.first{border-top:0}#agents h2{max-width:13em;text-wrap:balance}.links a[aria-current]{color:#fff}
+.askbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:20px}.askbar .btn{margin-top:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px}
+.seg button{font:inherit;font-size:14px;letter-spacing:.08em;color:var(--nav);background:none;border:0;border-radius:999px;padding:9px 18px;cursor:pointer}
+.seg button[aria-checked=true]{background:#fff;color:#050505}.seg button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.rv{opacity:0;transform:translateY(18px);transition:opacity .9s var(--ease),transform .9s var(--ease)}.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.rv,.pipe li{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+@media (max-width:700px){.rows>div,.cmp,.verdict{grid-template-columns:1fr}.cmp>div+div{border-left:0;padding-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/" aria-label="Home">
+      <svg viewBox="0 0 31.5 48.5" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="bg1" gradientUnits="userSpaceOnUse" x1="8" y1="0" x2="34.1" y2="28.9">
+          <stop offset="0" stop-color="#9e9e9e"/><stop offset=".28" stop-color="#a6a6a6"/><stop offset=".34" stop-color="#a3a3a3"/>
+          <stop offset=".4" stop-color="#3a3a3a"/><stop offset=".55" stop-color="#414141"/><stop offset=".6" stop-color="#7a7a7a"/>
+          <stop offset=".68" stop-color="#8e8e8e"/><stop offset=".8" stop-color="#a9a9a9"/><stop offset=".95" stop-color="#c4c4c4"/><stop offset="1" stop-color="#ccc"/>
+        </linearGradient></defs>
+        <path d="M21.5 0 L21.5 19.5 L31.5 19.5 L31.5 29 L10 48.5 L10 28.5 L0.5 28.5 L0.5 18.5 Z" fill="url(#bg1)"/>
+        <rect x="0.5" y="18.5" width="9" height="10" fill="#fdfdfd"/>
+        <rect x="22" y="19.5" width="9.5" height="9.5" fill="#fdfdfd"/>
+      </svg>
+    </a>
+    <nav class="links" aria-label="Primary"><a href="#/about">About</a><a href="#/intelligence">Intelligence</a><a href="#/jurisdictions">Jurisdictions</a><a href="#/evidence">Evidence</a><a href="#/agents">Agents</a><a href="#/research">Research</a><a href="#/contact">Contact</a></nav>
+    <a class="pill pill-nav" href="#/ask"><span>Ask HackGrid</span></a>
+    <button class="burger" id="burger" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="menu"><i></i><i></i></button>
+  </header>
+  <nav class="menu" id="menu" aria-hidden="true" aria-label="Mobile">
+    <div class="menu-inner">
+      <p class="menu-eyebrow">Menu</p>
+      <ul class="menu-list"><li><a href="#/about">About</a></li><li><a href="#/intelligence">Intelligence</a></li><li><a href="#/jurisdictions">Jurisdictions</a></li><li><a href="#/evidence">Evidence</a></li><li><a href="#/agents">Agents</a></li><li><a href="#/research">Research</a></li><li><a href="#/contact">Contact</a></li></ul>
+      <div class="menu-foot">
+        <a class="pill" href="#/ask"><span>Ask HackGrid</span></a>
+        <a class="ghost" href="#/intelligence">Explore the system</a>
+      </div>
+    </div>
+  </nav>
+<div class="stage" id="stage">
+  <div class="plate">
+    <video class="plate-video" autoplay muted loop playsinline preload="auto" aria-hidden="true">
+      <source src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260808_112712_da9d53df-6d27-4b12-bdf6-aa9dc2622bdf.mp4" type="video/mp4">
+    </video>
+  </div>
+
+
+
+  <main class="hero">
+    <h1 class="headline"><span>HackGrid</span></h1>
+    <p class="sub"><span>From global standards to local requirements —</span> <span>powered by evidence-grounded AI.</span></p>
+    <div class="actions">
+      <a class="pill pill-cta" href="#/ask"><span>Ask HackGrid</span></a>
+      <a class="ghost" href="#/intelligence">Explore the system</a>
+    </div>
+  </main>
+
+  <div class="logos" aria-label="Evidence domains"><span>3GPP</span><span>ITU-T</span><span>TEC</span><span>TRAI</span><span>DoT</span><span>DPDP</span></div>
+</div>
+
+<div class="story">
+<section class="sec rv" id="about" data-page="about"><div class="k"><span>What is HackGrid?</span></div>
+<h2>A telecom requirement is global. Its obligations are local.</h2>
+<p class="lead">HackGrid is an evidence-grounded AI platform that shows how international standards, national regulations and policies interact. It retrieves evidence from both sides, then determines the relationship between them.</p>
+<ol class="flow" id="coreflow"></ol></section>
+
+<section class="sec rv" id="problem" data-page="about"><div class="k"><span>Why is it difficult?</span></div>
+<h2>The hard part is not finding the document.</h2>
+<p class="lead">Technical standards, national regulation, cybersecurity, privacy, AI governance, conformity and operating conditions all apply at once. Each is written in its own language.</p>
+<div class="stack"><div>Global standard<span>3GPP, ITU-T</span></div><em>↕</em><div>National requirement<span>Law, regulation, technical requirement</span></div><em>↕</em><div>Deployment context<span>Network, operator, conditions</span></div></div>
+<p class="quote">The real question: how does this requirement apply here?</p></section>
+
+<section class="sec" id="intelligence" data-page="intelligence"><div class="k rv"><span>How does HackGrid think?</span></div>
+<h2 class="rv">An intelligence pipeline, not a chat window.</h2>
+<ol class="pipe" id="pipe"></ol></section>
+
+<section class="sec rv" id="agents" data-page="agents"><div class="k"><span>How do the agents cooperate?</span></div>
+<h2>Specialised functions working on the same evidence.</h2>
+<p class="lead">Each agent has one analytical job. They share a single evidence set and hand structured results forward.</p>
+<svg class="dia" viewBox="0 0 700 320" role="img" aria-label="HackGrid feeds Network, Compliance and Policy agents, which converge on Gap Analysis, then Synthesis and Human Review"><path d="M350 34V60M120 60H580M120 60V98M350 60V98M580 60V98M120 134V170H350M580 134V170H350M350 134V188M350 222V240M350 264V282"/><text x="350" y="22">HackGrid</text><text x="120" y="118">Network</text><text x="350" y="118">Compliance</text><text x="580" y="118">Policy</text><text x="350" y="208">Gap Analysis</text><text x="350" y="256">Synthesis</text><text x="350" y="304">Human Review</text></svg>
+<div class="rows" id="agentrows"></div></section>
+
+<section class="sec rv" id="jurisdictions" data-page="jurisdictions"><div class="k"><span>How does jurisdiction change the answer?</span></div>
+<h2>One intelligence engine. Portable jurisdiction profiles.</h2>
+<p class="lead">The reasoning stays the same. The jurisdictional evidence changes. India is the active profile today.</p>
+<div class="tabs" role="tablist" aria-label="Jurisdiction"></div><div class="panel" id="jpanel" role="tabpanel"></div></section>
+
+<section class="sec rv" id="evidence" data-page="evidence"><div class="k"><span>What evidence does it use?</span></div>
+<h2>Evidence first. Generation second.</h2>
+<p class="lead">HackGrid does not ask a language model for an answer and hope. It retrieves relevant evidence first, and every agent works from that evidence.</p>
+<ol class="flow" id="ragflow"></ol>
+<div class="rows" id="ragrows"></div></section>
+
+<section class="sec rv" id="compare" data-page="jurisdictions"><div class="k"><span>What does a relationship look like?</span></div>
+<h2>Two sources of evidence, one assessment.</h2>
+<div class="cmp"><div><small>International requirement</small><b>3GPP TS XX.XXX</b><p>Clause X.X<br>Technical requirement text appears here.</p></div><div><small>Indian requirement</small><b>TEC / DoT / TRAI / Indian law</b><p>Section X<br>National requirement text appears here.</p></div></div>
+<div class="verdict"><h3>Partially covered</h3><p><i>Why</i>Some elements are addressed nationally; others have no retrieved counterpart.</p><p><i>Verification status</i>Awaiting human review. Confidence shown with the evidence.</p></div>
+<span class="note">Synthetic demonstration. Placeholders, not real clauses or conclusions.</span></section>
+
+<section class="sec rv" id="gap" data-page="intelligence"><div class="k"><span>How are gaps classified?</span></div>
+<h2>Seven relationships. No guessing.</h2>
+<div class="rows" id="gaprows"></div>
+<p class="big">Missing evidence is not evidence of absence.</p>
+<p class="big">A stricter national requirement is not automatically a conflict.</p></section>
+
+<section class="sec rv" id="review" data-page="intelligence"><div class="k"><span>What does the human do?</span></div>
+<h2>AI proposes. A person decides.</h2>
+<ol class="flow" id="revflow"></ol>
+<div class="panel"><strong>Assessment: partially covered (synthetic demonstration)</strong><br>Review the evidence on both sides, then choose.
+<div class="dec"><button class="btn" data-d="Approved">Approve</button><button class="btn" data-d="Modified">Modify</button><button class="btn" data-d="Rejected">Reject</button></div><p id="decision" aria-live="polite"></p></div></section>
+
+<section class="sec" id="audit" data-page="intelligence"><div class="k rv"><span>How do we know it is trustworthy?</span></div>
+<h2 class="rv">Every conclusion traces back to evidence.</h2>
+<ol class="pipe" id="auditpipe"></ol></section>
+
+<section class="sec rv" id="ask" data-page="ask"><div class="k"><span>Ask HackGrid</span></div>
+<h2>Put a real question to the system.</h2>
+<label for="q" class="lead">Your question</label>
+<textarea id="q">How does Indian regulation apply to a 5G network slicing requirement defined by 3GPP?</textarea>
+<div class="askbar"><div class="seg" role="radiogroup" aria-label="Country profile"><button type="button" role="radio" aria-checked="true" data-p="IN">IN</button><button type="button" role="radio" aria-checked="false" data-p="EU">EU</button></div><button class="btn pri" id="askbtn" type="button">Ask HackGrid</button><span class="mail" id="proflabel" style="margin:0"></span></div>
+<div class="res" id="res" hidden></div></section>
+
+<section class="sec" id="incidents" data-page="agents"><div class="k rv"><span>What about network incidents?</span></div>
+<h2 class="rv">Follow an incident as evidence arrives.</h2>
+<p class="lead rv">HackGrid can analyse an incident as it develops, re-running the agents when new evidence appears.</p><span class="note rv">Synthetic demonstration. Not a real operator incident.</span>
+<ol class="pipe" id="incpipe"></ol></section>
+
+<section class="sec rv" id="research" data-page="research"><div class="k"><span>Where is this going?</span></div>
+<h2>Built as a research prototype.</h2>
+<div class="rows" id="resrows"></div></section>
+
+<section class="sec rv" id="knowledge" data-page="evidence"><div class="k"><span>What is in the knowledge base?</span></div>
+<h2>Evidence domains.</h2>
+<div class="kb" id="kb"></div></section>
+<section class="sec rv" id="contact" data-page="contact"><div class="k"><span>About and contact</span></div>
+<h2>A research platform, built by one developer.</h2>
+<p class="lead">HackGrid is a research-oriented, multi-agent, multi-jurisdiction intelligence platform. It works on telecom standards, regulations, AI governance, network analysis, evidence-grounded RAG, gap analysis and human verification.</p>
+<div class="rows">
+<div><b>Shashank Kotnala</b><div><p>Founder / Developer of HackGrid.</p><p>B.Tech ECE student and technology researcher focused on wireless communication, AI/ML, telecommunications and intelligent regulatory analysis.</p></div></div>
+<div><b>Team</b><div><p>HackGrid</p></div></div>
+<div><b>Presented</b><div><p>ITU AI for Good Build-a-thon 5.0.</p><p>Presenting at the event does not imply endorsement, certification, partnership or an award.</p></div></div>
+</div>
+<p class="big">Have a question, collaboration idea, research opportunity, or problem you&rsquo;d like HackGrid to explore? Get in touch.</p>
+<a class="btn pri cta-mail" href="mailto:shashankkot009@gmail.com?subject=HackGrid%20%E2%80%94%20Query%20%2F%20Collaboration%20%2F%20Feedback">Contact Us</a>
+<p class="mail">shashankkot009@gmail.com</p></section>
+
+<footer class="foot">HackGrid is a research prototype. It is not legal advice, and it has no certification, endorsement or institutional partnership. Demonstration content on this page is synthetic.</footer>
+</div>
+
+<script>
+(function(){
+  var stage=document.body,b=document.getElementById('burger'),m=document.getElementById('menu');
+  function set(o){
+    stage.classList.toggle('is-open',o);
+    b.setAttribute('aria-expanded',o);
+    b.setAttribute('aria-label',o?'Close menu':'Open menu');
+    m.setAttribute('aria-hidden',!o);
+  }
+  b.addEventListener('click',function(){set(!stage.classList.contains('is-open'))});
+  m.addEventListener('click',function(e){if(e.target.closest('a'))set(false)});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')set(false)});
+  window.addEventListener('resize',function(){if(innerWidth/innerHeight>1.1)set(false)});
+})();
+</script>
+<script>
+(function(){
+var D={
+core:["Global standard","Technical requirement","Jurisdiction","National regulation","Multi-agent analysis","Relationship","Assessment","Human review","Auditable result"],
+pipe:[["Question or incident","What the user asks, or what the network reports."],["Evidence retrieval","Relevant passages are pulled from the knowledge base."],["Network","The technical requirement is understood."],["Compliance","Applicable regulations and standards are determined."],["Policy","Jurisdiction-specific context is interpreted."],["Gap analysis","Requirements are compared and the relationship is classified."],["Synthesis","The analysis becomes one concise assessment."],["Human review","A reviewer approves, modifies or rejects."]],
+agents:[["Network Agent",[["Purpose","Understands the technical or network requirement."],["Input","Question or incident, retrieved standards evidence."],["Output","A structured technical requirement."],["Feeds","Compliance, Policy, Gap Analysis."]]],
+["Compliance Agent",[["Purpose","Determines regulatory and standards applicability."],["Input","Technical requirement, retrieved evidence."],["Output","The instruments that apply, with reasons."],["Feeds","Gap Analysis."]]],
+["Policy Agent",[["Purpose","Interprets jurisdiction-specific policy context."],["Input","Technical requirement, jurisdiction profile evidence."],["Output","Policy context for the selected jurisdiction."],["Feeds","Gap Analysis."]]],
+["Gap Analysis Agent",[["Purpose","Compares requirements and identifies relationships or gaps."],["Input","Network, Compliance and Policy outputs."],["Output","A relationship classification with reasons."],["Feeds","Coordinator / Synthesis."]]],
+["Coordinator / Synthesis",[["Purpose","Combines the grounded analysis into a concise assessment."],["Input","Gap Analysis output and its evidence."],["Output","The assessment shown to the reviewer."],["Feeds","Human Review."]]],
+["Human Review",[["Purpose","Keeps a person as the final authority."],["Input","Assessment and evidence."],["Output","Approve, modify or reject, recorded in the audit trail."]]]],
+jur:[["India","Active","The primary profile. A requirement is evaluated against Indian evidence: <strong>TEC, DoT, TRAI, Indian Acts, DPDP</strong>. Flow: international requirement, India profile, Indian regulatory evidence, assessment."],
+["European Union","In progress","A second profile under development, reusing the same engine with EU evidence. Not yet presented as a finished capability."],
+["Future regions","Coming / research extension","Not implemented. Other jurisdictions would be added as new profiles, not new engines."]],
+rag:[["Documents"],["Chunking"],["BGE-M3"],["Vector representation"],["FAISS"],["Relevant evidence"],["Agents"],["Synthesis"]],
+ragrows:[["BGE-M3","Embedding model. Turns passages and questions into vectors."],["FAISS","Vector similarity retrieval. Finds the passages closest to the question."],["In the interface","Reviewers see evidence and reasons, not raw retrieval scores or debug output."]],
+gaps:[["Covered","The national requirement addresses the same obligation."],["Partially covered","Some elements are addressed; others are not evidenced."],["Additional national requirement","The national text asks for more than the standard."],["Potential policy / standards gap","A requirement has no counterpart on the other side."],["Conflict","The two requirements cannot both be satisfied."],["Insufficient evidence","Retrieval did not surface enough to decide."],["Not applicable","The requirement does not apply in this context."]],
+rev:["AI assessment","Evidence","Human review","Approve / modify / reject","Audit trail"],
+audit:[["Question","What was asked, and in which jurisdiction."],["Evidence retrieved","The passages used, with their sources."],["Agent analysis","What each agent concluded from that evidence."],["Assessment","The relationship and the reasons for it."],["Human decision","Approve, modify or reject, with the reviewer's change."],["Final result","The answer, linked back to every step above."]],
+inc:[["Baseline","Normal network behaviour is established."],["Incident emergence","Anomalous behaviour appears."],["New evidence","Fresh signals are added to the evidence set."],["Network analysis","The technical picture is updated."],["Compliance","Applicable obligations are re-checked."],["Policy","Jurisdiction context is re-read."],["Gap","The relationship is re-classified."],["Human review","A reviewer confirms or corrects."]],
+res:[["Evidence-grounded regulatory intelligence"],["Jurisdiction-aware RAG"],["Multi-agent reasoning"],["Telecom standards crosswalk"],["AI governance"],["5G / 6G compliance"],["Human-in-the-loop verification"]],
+kb:["3GPP","ITU-T","TEC","TRAI","DoT","Indian Acts","DPDP","EU Rules","AI Governance","Bharat 6G","TSDSI"]};
+var $=function(i){return document.getElementById(i)};
+function flow(id,a){$(id).innerHTML=a.map(function(x){return '<li>'+(x[0]||x)+'</li>'}).join('')}
+function pipe(id,a){$(id).innerHTML=a.map(function(x){return '<li><b>'+x[0]+'</b><span>'+x[1]+'</span></li>'}).join('')}
+function rows(id,a){$(id).innerHTML=a.map(function(x){var b=x[1];return '<div><b>'+x[0]+'</b><div>'+(Array.isArray(b)?b.map(function(l){return '<p><i>'+l[0]+'</i>'+l[1]+'</p>'}).join(''):'<p>'+(b||'')+'</p>')+'</div></div>'}).join('')}
+flow('coreflow',D.core);pipe('pipe',D.pipe);rows('agentrows',D.agents);flow('ragflow',D.rag);rows('ragrows',D.ragrows);rows('gaprows',D.gaps);flow('revflow',D.rev);pipe('auditpipe',D.audit);pipe('incpipe',D.inc);rows('resrows',D.res.map(function(r){return [r[0],'']}));
+$('kb').innerHTML=D.kb.map(function(k){return '<span>'+k+'</span>'}).join('');
+/* jurisdiction selector */
+var tabs=document.querySelector('.tabs'),jp=$('jpanel');
+function jsel(i){[].forEach.call(tabs.children,function(b,n){b.setAttribute('aria-selected',n===i)});jp.innerHTML='<strong>'+D.jur[i][0]+' — '+D.jur[i][1]+'</strong><br>'+D.jur[i][2]}
+D.jur.forEach(function(j,i){var b=document.createElement('button');b.type='button';b.setAttribute('role','tab');b.textContent=j[0];b.onclick=function(){jsel(i)};tabs.appendChild(b)});jsel(0);
+/* human review (demo) */
+[].forEach.call(document.querySelectorAll('[data-d]'),function(b){b.onclick=function(){$('decision').textContent=b.dataset.d+'. Recorded in the audit trail (demonstration only).'}});
+/* query (synthetic) */
+$('askbtn').onclick=function(){var q=$('q').value.trim()||'(empty question)',r=$('res');
+r.hidden=false;r.innerHTML='<span class="note">Synthetic demonstration. No backend is connected.</span><div class="verdict"><h3>Partially covered</h3><p><i>Question</i><span id="qe"></span></p><p><i>Jurisdiction</i><span id="je"></span></p><p><i>Relationship</i>Partially covered</p><p><i>Verification status</i>Pending human review</p><p><i>Why</i>The national requirement addresses part of the technical obligation. Other parts have no retrieved counterpart.</p><p><i>Most relevant evidence</i>3GPP TS XX.XXX, clause X.X, and a regulatory section from the selected profile (placeholders).</p></div><details><summary>View agent analysis</summary>Network, Compliance, Policy and Gap Analysis summaries would appear here.</details><details><summary>View evidence</summary>Retrieved passages with their sources would appear here.</details><details><summary>Request human review</summary>The assessment would be queued for a reviewer.</details>';
+$('qe').textContent=q;$('je').textContent=PN[prof]};
+/* scroll storytelling */
+var els=document.querySelectorAll('.rv,.pipe li');
+if('IntersectionObserver' in window){var io=new IntersectionObserver(function(e){e.forEach(function(x){if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target)}})},{threshold:.35});els.forEach(function(el){io.observe(el)})}else{els.forEach(function(el){el.classList.add('in')})}
+
+var PN={IN:'India',EU:'European Union'},prof='IN';
+try{prof=localStorage.getItem('hg-profile')==='EU'?'EU':'IN'}catch(e){}
+function setProf(p){prof=p;try{localStorage.setItem('hg-profile',p)}catch(e){}
+[].forEach.call(document.querySelectorAll('.seg button'),function(b){b.setAttribute('aria-checked',b.dataset.p===p)});
+$('proflabel').textContent='Profile: '+PN[p];var je=$('je');if(je)je.textContent=PN[p]}
+[].forEach.call(document.querySelectorAll('.seg button'),function(b){b.onclick=function(){setProf(b.dataset.p)}});setProf(prof);
+/* page router */
+var T={home:'HackGrid',about:'About',intelligence:'Intelligence',agents:'Agents',jurisdictions:'Jurisdictions',evidence:'Evidence',research:'Research',contact:'Contact',ask:'Ask HackGrid'};
+function route(){var r=(location.hash.replace(/^#\/?/,'')||'home').split('?')[0];if(!(r in T))r='home';
+document.body.classList.toggle('inner',r!=='home');
+$('stage').style.display=r==='home'?'':'none';document.querySelector('.story').hidden=r==='home';
+var f=false;[].forEach.call(document.querySelectorAll('.sec'),function(x){var on=x.dataset.page===r;x.hidden=!on;x.classList.toggle('first',on&&!f);if(on)f=true});
+[].forEach.call(document.querySelectorAll('.links a,.menu-list a'),function(a){if(a.getAttribute('href')==='#/'+r)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+document.title=r==='home'?'HackGrid':'HackGrid — '+T[r];window.scrollTo({top:0,left:0,behavior:'instant'})}
+window.addEventListener('hashchange',route);route();
+})();
+</script>
+</body>
+</html>
