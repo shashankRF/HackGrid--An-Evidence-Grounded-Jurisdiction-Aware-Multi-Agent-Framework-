@@ -13,8 +13,10 @@ AUDIT_DIR = (
 )
 
 AUDIT_FILE = AUDIT_DIR / "audit.jsonl"
+REVIEW_EVENTS_FILE = AUDIT_DIR / "review_events.jsonl"
 
 PIPELINE_VERSION = "hackgrid-evidence-pipeline-v1"
+
 
 
 def _canonical_json(data: Dict[str, Any]) -> str:
@@ -150,3 +152,131 @@ def load_audit_records() -> List[Dict[str, Any]]:
             )
 
     return records
+
+
+def append_review_event(
+    event: Dict[str, Any],
+) -> None:
+
+    AUDIT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with REVIEW_EVENTS_FILE.open(
+        "a",
+        encoding="utf-8",
+    ) as file:
+
+        file.write(
+            json.dumps(
+                event,
+                ensure_ascii=False,
+                default=str,
+            )
+        )
+
+        file.write("\n")
+
+
+def load_review_events() -> List[Dict[str, Any]]:
+
+    if not REVIEW_EVENTS_FILE.exists():
+        return []
+
+    events = []
+
+    with REVIEW_EVENTS_FILE.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        for line in file:
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            events.append(
+                json.loads(line)
+            )
+
+    return events
+
+
+def get_latest_review_event(
+    audit_id: str,
+) -> Dict[str, Any] | None:
+
+    events = load_review_events()
+
+    for ev in reversed(events):
+
+        if ev.get("audit_id") == audit_id:
+            return ev
+
+    return None
+
+
+def get_all_latest_review_events() -> Dict[str, Dict[str, Any]]:
+
+    events = load_review_events()
+
+    latest_map: Dict[str, Dict[str, Any]] = {}
+
+    for ev in events:
+
+        aid = ev.get("audit_id")
+
+        if aid:
+            latest_map[aid] = ev
+
+    return latest_map
+
+
+def apply_review_overlay(
+    record: Dict[str, Any],
+    review_event: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+
+    overlay = dict(record)
+
+    # Invariant: human_review_required answers:
+    # "DID THIS AI ASSESSMENT REQUIRE HUMAN REVIEW?"
+    # It remains untouched.
+    req = bool(overlay.get("human_review_required", False))
+    overlay["human_review_required"] = req
+
+    if review_event:
+        action = str(
+            review_event.get("human_action")
+            or review_event.get("final_decision")
+            or "APPROVED"
+        ).upper()
+
+        overlay["human_review_status"] = action
+        overlay["human_action"] = action
+        overlay["final_decision"] = action
+        overlay["human_reviewer"] = (
+            review_event.get("reviewer") or "Human reviewer"
+        )
+        overlay["reviewer"] = overlay["human_reviewer"]
+        overlay["review_timestamp"] = review_event.get("timestamp")
+        overlay["reviewer_modifications"] = review_event.get("reviewer_modifications")
+        overlay["reviewer_reason"] = review_event.get("reviewer_reason")
+    else:
+        overlay["human_review_status"] = "PENDING"
+        overlay["human_action"] = ""
+        overlay["final_decision"] = (
+            "PENDING_HUMAN_REVIEW"
+            if req
+            else overlay.get("final_decision", "SYSTEM_RECOMMENDATION")
+        )
+        overlay["human_reviewer"] = overlay.get("human_reviewer", "")
+        overlay["reviewer"] = overlay.get("human_reviewer", "")
+        overlay["review_timestamp"] = None
+        overlay["reviewer_modifications"] = None
+        overlay["reviewer_reason"] = None
+
+    return overlay

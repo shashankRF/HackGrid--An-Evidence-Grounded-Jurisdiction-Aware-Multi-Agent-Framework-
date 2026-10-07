@@ -1,26 +1,59 @@
 from typing import Optional
 from pathlib import Path
+
 from dotenv import load_dotenv
 
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / ".env")
+
+load_dotenv(
+    PROJECT_ROOT / ".env"
+)
+
+# ============================================================
+# FASTAPI
+# ============================================================
+
 from fastapi import FastAPI, HTTPException
-from dotenv import load_dotenv
-load_dotenv()
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+# ============================================================
+# HACKGRID IMPORTS
+# ============================================================
 
 from .risk_engine_api import router as risk_router
 from .audit_api import router as audit_router
-from .orchestrator import run_pipeline
-from .demo_scenarios import get_scenarios, get_scenario
-from rag.retrieval import JURISDICTION_PROFILES
+from .audit.recorder import (
+    load_audit_records,
+    get_latest_review_event,
+)
 
+from .orchestrator import run_pipeline
+
+from .demo_scenarios import (
+    get_scenarios,
+    get_scenario,
+)
+
+from rag.retrieval import (
+    JURISDICTION_PROFILES,
+)
+
+
+# ============================================================
+# APPLICATION
+# ============================================================
 
 app = FastAPI(
     title="HackGrid Backend",
     version="1.0",
-    description="HackGrid Evidence Intelligence Backend",
+    description=(
+        "HackGrid Evidence Intelligence Backend"
+    ),
 )
 
 
@@ -30,61 +63,118 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:8000", "http://127.0.0.1:8000"],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+
+        "http://localhost:5501",
+        "http://127.0.0.1:5501",
+
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+
+    allow_origin_regex=(
+        r"https?://"
+        r"(localhost|127\.0\.0\.1)"
+        r"(:\d+)?"
+    ),
+
     allow_credentials=True,
+
     allow_methods=["*"],
+
     allow_headers=["*"],
 )
 
 
 # ============================================================
-# Existing Risk Engine
+# EXISTING RISK + AUDIT ENGINES
 # ============================================================
 
-app.include_router(risk_router)
-app.include_router(audit_router)
+app.include_router(
+    risk_router
+)
+
+app.include_router(
+    audit_router
+)
 
 
 # ============================================================
-# Request Models
+# REQUEST MODELS
 # ============================================================
 
 class QueryRequest(BaseModel):
+
     question: Optional[str] = None
+
     query: Optional[str] = None
+
     jurisdiction: str = "India"
+
+    # Normal query endpoint can explicitly select
+    # FULL or DEMO execution.
+    #
+    # Default remains DEMO because the frontend is
+    # primarily interactive.
+    demo_mode: Optional[bool] = True
 
 
 class ScenarioRunRequest(BaseModel):
+
     scenario_id: str
+
     jurisdiction: str = "India"
+
     step_id: Optional[str] = None
 
 
 # ============================================================
-# Helpers
+# HELPERS
 # ============================================================
 
-def validate_jurisdiction(jurisdiction: str):
+def validate_jurisdiction(
+    jurisdiction: str,
+):
+    """
+    Validate the requested jurisdiction against
+    the actual jurisdiction profiles exposed by
+    the RAG retrieval layer.
+    """
+
     if jurisdiction not in JURISDICTION_PROFILES:
-        supported = ", ".join(JURISDICTION_PROFILES.keys())
+
+        supported = ", ".join(
+            JURISDICTION_PROFILES.keys()
+        )
 
         raise HTTPException(
             status_code=400,
+
             detail=(
-                f"Unsupported jurisdiction profile '{jurisdiction}'. "
-                f"Supported jurisdiction profiles: {supported}"
+                f"Unsupported jurisdiction profile "
+                f"'{jurisdiction}'. "
+                f"Supported jurisdiction profiles: "
+                f"{supported}"
             ),
         )
 
 
 # ============================================================
-# Basic Endpoints
+# BASIC ENDPOINTS
 # ============================================================
 
 @app.get("/")
 def root():
+
     return {
         "status": "online",
         "project": "HackGrid",
@@ -93,178 +183,571 @@ def root():
     }
 
 
+# ============================================================
+# HEALTH
+# ============================================================
+
 @app.get("/api/health")
 def health():
+
     try:
-        from rag.multi_kb_retriever import get_unified_retriever
-        retriever = get_unified_retriever()
-        kb_info = retriever.get_status()
+
+        from rag.multi_kb_retriever import (
+            get_unified_retriever
+        )
+
+        retriever = (
+            get_unified_retriever()
+        )
+
+        kb_info = (
+            retriever.get_status()
+        )
+
     except Exception:
+
+        # Fallback health information.
+        #
+        # This does NOT regenerate or modify
+        # any knowledge base.
+
         kb_info = {
-            "MAIN": {"status": "READY", "chunks": 14143, "vectors": 14143, "dimension": 1024},
-            "DEFENCE": {"status": "READY", "chunks": 397, "vectors": 397, "dimension": 1024},
-            "MARITIME": {"status": "READY", "chunks": 273, "vectors": 273, "dimension": 1024},
-            "unified_retriever": "READY"
+            "MAIN": {
+                "status": "READY",
+                "chunks": 14143,
+                "vectors": 14143,
+                "dimension": 1024,
+            },
+
+            "DEFENCE": {
+                "status": "READY",
+                "chunks": 397,
+                "vectors": 397,
+                "dimension": 1024,
+            },
+
+            "MARITIME": {
+                "status": "READY",
+                "chunks": 273,
+                "vectors": 273,
+                "dimension": 1024,
+            },
+
+            "unified_retriever": "READY",
         }
 
     return {
+
         "status": "healthy",
+
         "project": "HackGrid",
+
         "risk_engine": "available",
-        "jurisdictions": list(JURISDICTION_PROFILES.keys()),
-        "scenario_count": len(get_scenarios()),
-        "main": kb_info.get("MAIN", {"status": "READY", "chunks": 14143, "vectors": 14143, "dimension": 1024}),
-        "defence": kb_info.get("DEFENCE", {"status": "READY", "chunks": 397, "vectors": 397, "dimension": 1024}),
-        "maritime": kb_info.get("MARITIME", {"status": "READY", "chunks": 273, "vectors": 273, "dimension": 1024}),
-        "unified_retriever": kb_info.get("unified_retriever", "READY"),
+
+        "jurisdictions": list(
+            JURISDICTION_PROFILES.keys()
+        ),
+
+        "scenario_count": len(
+            get_scenarios()
+        ),
+
+        "main": kb_info.get(
+            "MAIN",
+            {
+                "status": "READY",
+                "chunks": 14143,
+                "vectors": 14143,
+                "dimension": 1024,
+            },
+        ),
+
+        "defence": kb_info.get(
+            "DEFENCE",
+            {
+                "status": "READY",
+                "chunks": 397,
+                "vectors": 397,
+                "dimension": 1024,
+            },
+        ),
+
+        "maritime": kb_info.get(
+            "MARITIME",
+            {
+                "status": "READY",
+                "chunks": 273,
+                "vectors": 273,
+                "dimension": 1024,
+            },
+        ),
+
+        "unified_retriever": kb_info.get(
+            "unified_retriever",
+            "READY",
+        ),
     }
 
 
 # ============================================================
-# Jurisdiction Endpoint
+# JURISDICTION ENDPOINT
 # ============================================================
 
 @app.get("/api/jurisdictions")
 def jurisdictions():
+
     return {
         "jurisdictions": [
+
             {
                 "name": name,
-                "included_sources": sorted(list(sources)),
+
+                "included_sources": sorted(
+                    list(sources)
+                ),
             }
-            for name, sources in JURISDICTION_PROFILES.items()
+
+            for name, sources
+            in JURISDICTION_PROFILES.items()
         ]
     }
 
 
 # ============================================================
-# Query Endpoint
+# QUERY ENDPOINT
 # ============================================================
 
 @app.post("/api/query")
-def query(request: QueryRequest):
-    validate_jurisdiction(request.jurisdiction)
+def query(
+    request: QueryRequest,
+):
 
-    q = (request.question or request.query or "").strip()
+    # --------------------------------------------------------
+    # Validate jurisdiction
+    # --------------------------------------------------------
+
+    validate_jurisdiction(
+        request.jurisdiction
+    )
+
+    # --------------------------------------------------------
+    # Resolve question/query
+    # --------------------------------------------------------
+
+    q = (
+        request.question
+        or request.query
+        or ""
+    ).strip()
+
     if not q or len(q) < 3:
+
         raise HTTPException(
             status_code=422,
-            detail="Field 'question' or 'query' must be provided with at least 3 characters.",
+
+            detail=(
+                "Field 'question' or 'query' "
+                "must be provided with at least "
+                "3 characters."
+            ),
         )
 
+    # --------------------------------------------------------
+    # Resolve execution mode
+    # --------------------------------------------------------
+
+    demo = (
+        True
+        if request.demo_mode is None
+        else request.demo_mode
+    )
+
+    # --------------------------------------------------------
+    # Execute HackGrid pipeline
+    # --------------------------------------------------------
+
     try:
-        result = run_pipeline(
+        import importlib
+        import Backend.governance
+        import Backend.orchestrator
+        importlib.reload(Backend.governance)
+        importlib.reload(Backend.orchestrator)
+
+        result = Backend.orchestrator.run_pipeline(
             q,
-            jurisdiction=request.jurisdiction,
+            jurisdiction=(
+                request.jurisdiction
+            ),
+            demo_mode=demo,
         )
 
         return result
 
     except ValueError as exc:
+
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Pipeline execution failed: {exc}",
+
+            detail=(
+                "Pipeline execution failed: "
+                f"{exc}"
+            ),
         )
 
 
 # ============================================================
-# Scenario Endpoints
+# SCENARIO ENDPOINTS
 # ============================================================
 
 @app.get("/api/scenarios")
 def scenarios():
+
     return {
         "scenarios": get_scenarios()
     }
 
 
-@app.get("/api/scenarios/{scenario_id}")
-def scenario_detail(scenario_id: str):
-    scenario = get_scenario(scenario_id)
+# ============================================================
+# SCENARIO DETAIL
+# ============================================================
+
+@app.get(
+    "/api/scenarios/{scenario_id}"
+)
+def scenario_detail(
+    scenario_id: str,
+):
+
+    scenario = get_scenario(
+        scenario_id
+    )
 
     if scenario is None:
+
         raise HTTPException(
             status_code=404,
-            detail=f"Scenario '{scenario_id}' not found.",
+
+            detail=(
+                f"Scenario "
+                f"'{scenario_id}' "
+                f"not found."
+            ),
         )
 
     return scenario
 
 
-@app.post("/api/scenarios/run")
-def run_scenario(request: ScenarioRunRequest):
-    validate_jurisdiction(request.jurisdiction)
+# ============================================================
+# SCENARIO EXECUTION
+# ============================================================
 
-    scenario = get_scenario(request.scenario_id)
+@app.post("/api/scenarios/run")
+def run_scenario(
+    request: ScenarioRunRequest,
+):
+
+    # --------------------------------------------------------
+    # Validate jurisdiction
+    # --------------------------------------------------------
+
+    validate_jurisdiction(
+        request.jurisdiction
+    )
+
+    # --------------------------------------------------------
+    # Load scenario
+    # --------------------------------------------------------
+
+    scenario = get_scenario(
+        request.scenario_id
+    )
 
     if scenario is None:
+
         raise HTTPException(
             status_code=404,
-            detail=f"Scenario '{request.scenario_id}' not found.",
+
+            detail=(
+                f"Scenario "
+                f"'{request.scenario_id}' "
+                f"not found."
+            ),
         )
 
-    steps = scenario.get("steps", [])
+    # --------------------------------------------------------
+    # Validate scenario steps
+    # --------------------------------------------------------
+
+    steps = scenario.get(
+        "steps",
+        []
+    )
 
     if not steps:
+
         raise HTTPException(
             status_code=400,
-            detail="Scenario contains no execution steps.",
+
+            detail=(
+                "Scenario contains "
+                "no execution steps."
+            ),
         )
+
+    # --------------------------------------------------------
+    # Select requested step
+    # --------------------------------------------------------
 
     selected_step = None
 
     if request.step_id:
+
         for step in steps:
-            if step["step_id"] == request.step_id:
+
+            if (
+                step["step_id"]
+                == request.step_id
+            ):
+
                 selected_step = step
+
                 break
 
         if selected_step is None:
+
             raise HTTPException(
                 status_code=404,
+
                 detail=(
-                    f"Step '{request.step_id}' not found "
-                    f"in scenario '{request.scenario_id}'."
+                    f"Step "
+                    f"'{request.step_id}' "
+                    f"not found in scenario "
+                    f"'{request.scenario_id}'."
                 ),
             )
+
     else:
+
         selected_step = steps[0]
 
-    question = selected_step["evidence_prompt"]
+    # --------------------------------------------------------
+    # Scenario question
+    # --------------------------------------------------------
+
+    question = (
+        selected_step[
+            "evidence_prompt"
+        ]
+    )
+
+    # --------------------------------------------------------
+    # Step progression & human review gating
+    # --------------------------------------------------------
+
+    selected_index = -1
+    for idx, step in enumerate(steps):
+        if step["step_id"] == selected_step["step_id"]:
+            selected_index = idx
+            break
+
+    prior_notes = []
+    prior_step_context = None
+
+    if selected_index > 0:
+        prev_step = steps[selected_index - 1]
+        prev_prompt = (prev_step.get("evidence_prompt") or "").strip()
+        prev_step_id = prev_step.get("step_id")
+
+        raw_records = load_audit_records()
+        prev_audit = None
+        for r in reversed(raw_records):
+            if (r.get("question") or "").strip() == prev_prompt:
+                prev_audit = r
+                break
+
+        if prev_audit is None:
+            return {
+                "blocked": True,
+                "reason": (
+                    f"Previous scenario step '{prev_step_id}' must be "
+                    "executed before proceeding."
+                ),
+                "required_action": "EXECUTE_PREVIOUS_STEP",
+                "previous_step_id": prev_step_id,
+                "previous_audit_id": None,
+            }
+
+        prev_audit_id = prev_audit.get("audit_id")
+        prev_req = bool(prev_audit.get("human_review_required", False))
+        if (prev_audit.get("risk_assessment") or {}).get("human_review_required"):
+            prev_req = True
+
+        if prev_req:
+            prev_review = get_latest_review_event(prev_audit_id)
+            prev_status = (
+                str(prev_review.get("human_action") or "").upper()
+                if prev_review
+                else "PENDING"
+            )
+
+            if prev_status == "PENDING":
+                return {
+                    "blocked": True,
+                    "reason": (
+                        "Previous scenario step is still pending "
+                        "human review."
+                    ),
+                    "required_action": "HUMAN_REVIEW",
+                    "previous_step_id": prev_step_id,
+                    "previous_audit_id": prev_audit_id,
+                }
+
+            elif prev_status == "REJECTED":
+                return {
+                    "blocked": True,
+                    "reason": (
+                        "Previous scenario step was rejected during "
+                        "human review."
+                    ),
+                    "required_action": "REVIEW_OR_RESTART",
+                    "previous_step_id": prev_step_id,
+                    "previous_audit_id": prev_audit_id,
+                }
+
+            elif prev_status in ("APPROVED", "MODIFIED"):
+                mod_text = (
+                    prev_review.get("reviewer_modifications")
+                    if prev_review
+                    else None
+                )
+                if prev_status == "MODIFIED" and mod_text:
+                    prior_notes.append(
+                        f"Prior step {prev_step_id} human modification: {mod_text}"
+                    )
+                prior_step_context = {
+                    "step_id": prev_step_id,
+                    "audit_id": prev_audit_id,
+                    "status": prev_status,
+                    "reviewer_modifications": mod_text,
+                }
+
+    # --------------------------------------------------------
+    # Execute scenario
+    #
+    # IMPORTANT:
+    # Scenario execution ALWAYS uses DEMO mode.
+    #
+    # This keeps the complete HackGrid architecture:
+    #
+    # Retrieval
+    # -> Reranking
+    # -> Counter Evidence
+    # -> Evidence Classification
+    # -> Evidence Engine
+    # -> Absence Verification
+    # -> Gap Analysis
+    # -> Risk Engine
+    # -> GPT-OSS Synthesis
+    # -> Governance
+    # -> Audit
+    #
+    # but uses the compact execution configuration
+    # so the interactive scenario does not spend
+    # unnecessary CPU time on large reranking sets.
+    # --------------------------------------------------------
 
     try:
+
         pipeline_result = run_pipeline(
+
             question,
-            jurisdiction=request.jurisdiction,
+
+            jurisdiction=(
+                request.jurisdiction
+            ),
+
+            demo_mode=True,
+
+            notes=prior_notes,
         )
 
+        # ----------------------------------------------------
+        # Return scenario + pipeline result
+        # ----------------------------------------------------
+
         return {
+
             "scenario": {
-                "scenario_id": scenario["scenario_id"],
-                "title": scenario["title"],
-                "domain": scenario["domain"],
-                "simulated": scenario["simulated"],
-                "default_jurisdiction": scenario["jurisdiction"],
-                "selected_jurisdiction": request.jurisdiction,
+
+                "scenario_id": (
+                    scenario[
+                        "scenario_id"
+                    ]
+                ),
+
+                "title": (
+                    scenario[
+                        "title"
+                    ]
+                ),
+
+                "domain": (
+                    scenario[
+                        "domain"
+                    ]
+                ),
+
+                "simulated": (
+                    scenario[
+                        "simulated"
+                    ]
+                ),
+
+                "default_jurisdiction": (
+                    scenario[
+                        "jurisdiction"
+                    ]
+                ),
+
+                "selected_jurisdiction": (
+                    request.jurisdiction
+                ),
             },
-            "scenario_step": selected_step,
-            "pipeline_result": pipeline_result,
+
+            "scenario_step": (
+                selected_step
+            ),
+
+            "pipeline_result": (
+                pipeline_result
+            ),
+
+            "prior_step_context": (
+                prior_step_context
+            ),
         }
 
     except ValueError as exc:
+
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Scenario execution failed: {exc}",
+
+            detail=(
+                "Scenario execution failed: "
+                f"{exc}"
+            ),
         )

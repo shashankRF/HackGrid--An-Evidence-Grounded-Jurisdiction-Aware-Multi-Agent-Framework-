@@ -205,7 +205,7 @@ flowchart TD
 NEAR TERM (v1.1)
   ├── Live compilation and active routing for dedicated Maritime & Defence KB indices
   ├── Hybrid sparse/dense retrieval (BM25 + BGE-M3 reciprocal rank fusion)
-  └── Multi-reviewer cryptographic digital signatures on audit entries"""
+  └── Multi-reviewer append-only audit recording on audit entries"""
 
     new_roadmap = """CURRENT (v1.1 Multi-Domain Operational)
   ├── 14,813 total chunks across 3 active Knowledge Bases (Main: 14,143, Defence: 397, Maritime: 273)
@@ -216,7 +216,7 @@ NEAR TERM (v1.1)
 
 NEAR TERM (v1.2)
   ├── Hybrid sparse/dense retrieval (BM25 + BGE-M3 reciprocal rank fusion)
-  └── Multi-reviewer cryptographic digital signatures on audit entries"""
+  └── Multi-reviewer append-only audit recording on audit entries"""
     if old_roadmap in text:
         text = text.replace(old_roadmap, new_roadmap)
 

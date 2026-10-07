@@ -8,6 +8,26 @@ except ImportError:
 
 MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 
+_MODEL_CACHE: Dict[tuple, Any] = {}
+
+
+def get_flag_reranker(model_name: str = MODEL_NAME, use_fp16: bool = False):
+    global _MODEL_CACHE
+    cache_key = (model_name, use_fp16)
+    if cache_key not in _MODEL_CACHE:
+        if FlagReranker is not None:
+            try:
+                _MODEL_CACHE[cache_key] = FlagReranker(
+                    model_name,
+                    use_fp16=use_fp16,
+                )
+            except Exception as e:
+                print(f"[EvidenceReranker] Warning: Could not initialize FlagReranker ({e}). Using similarity score fallback.")
+                _MODEL_CACHE[cache_key] = None
+        else:
+            _MODEL_CACHE[cache_key] = None
+    return _MODEL_CACHE[cache_key]
+
 
 class EvidenceReranker:
     def __init__(
@@ -16,17 +36,7 @@ class EvidenceReranker:
         use_fp16: bool = False,
     ):
         self.model_name = model_name
-        self.reranker = None
-
-        if FlagReranker is not None:
-            try:
-                self.reranker = FlagReranker(
-                    model_name,
-                    use_fp16=use_fp16,
-                )
-            except Exception as e:
-                print(f"[EvidenceReranker] Warning: Could not initialize FlagReranker ({e}). Using similarity score fallback.")
-                self.reranker = None
+        self.reranker = get_flag_reranker(model_name, use_fp16=use_fp16)
 
     def rerank(
         self,

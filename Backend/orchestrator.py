@@ -1,4 +1,5 @@
 import json
+import time
 
 from Backend.query_analysis.domain_classifier import classify
 
@@ -85,6 +86,49 @@ SUPPORTED_JURISDICTIONS = {
 
 
 # ============================================================
+# EXECUTION CONFIGURATION
+# ============================================================
+
+FULL_CONFIG = {
+    "retrieval_k": 20,
+    "rerank_candidate_limit": None,
+    "rerank_top_k": 8,
+    "counter_retrieval_k": 20,
+    "counter_rerank_candidate_limit": None,
+    "counter_rerank_top_k": 8,
+    "final_evidence_k": 8,
+}
+
+
+DEMO_CONFIG = {
+    # Compact execution for live frontend scenarios.
+    #
+    # The goal is to preserve the complete pipeline while
+    # drastically reducing expensive local cross-encoder work.
+    "retrieval_k": 10,
+    "rerank_candidate_limit": 5,
+    "rerank_top_k": 3,
+    "counter_retrieval_k": 6,
+    "counter_rerank_candidate_limit": 4,
+    "counter_rerank_top_k": 2,
+    "final_evidence_k": 4,
+}
+
+
+def _get_execution_config(demo_mode=False):
+    """
+    Return a copy of the execution configuration.
+
+    DEMO mode is intended for interactive scenario execution.
+    FULL mode is intended for complete backend analysis.
+    """
+
+    return dict(
+        DEMO_CONFIG if demo_mode else FULL_CONFIG
+    )
+
+
+# ============================================================
 # EVIDENCE ASSESSMENT SERIALIZATION
 # ============================================================
 
@@ -164,24 +208,78 @@ def _merge_evidence(
 
 
 # ============================================================
-# FULL HACKGRID PIPELINE
+# CACHED EVIDENCE RANKING PIPELINE
 # ============================================================
 
 _cached_ranking_pipeline = None
 
+
 def get_ranking_pipeline() -> EvidenceRankingPipeline:
     global _cached_ranking_pipeline
+
     if _cached_ranking_pipeline is None:
         _cached_ranking_pipeline = EvidenceRankingPipeline()
+
     return _cached_ranking_pipeline
 
+
+# ============================================================
+# FULL HACKGRID PIPELINE
+# ============================================================
 
 def run_pipeline(
     question,
     jurisdiction="India",
+    demo_mode=False,
+    notes=None,
 ):
 
+    t_start = time.perf_counter()
+
+    performance = {}
+
     question = question.strip()
+
+    if not question:
+        raise ValueError(
+            "Question cannot be empty."
+        )
+
+    # ========================================================
+    # EXECUTION CONFIGURATION
+    # ========================================================
+
+    execution_config = _get_execution_config(
+        demo_mode
+    )
+
+    primary_k = execution_config[
+        "retrieval_k"
+    ]
+
+    primary_rerank_candidate_limit = execution_config[
+        "rerank_candidate_limit"
+    ]
+
+    primary_rerank_top_k = execution_config[
+        "rerank_top_k"
+    ]
+
+    counter_k = execution_config[
+        "counter_retrieval_k"
+    ]
+
+    counter_rerank_candidate_limit = execution_config[
+        "counter_rerank_candidate_limit"
+    ]
+
+    counter_rerank_top_k = execution_config[
+        "counter_rerank_top_k"
+    ]
+
+    final_evidence_limit = execution_config[
+        "final_evidence_k"
+    ]
 
     # ========================================================
     # JURISDICTION VALIDATION
@@ -202,11 +300,25 @@ def run_pipeline(
     # 0. DOMAIN + INTENT CLASSIFICATION
     # ========================================================
 
+    t_stage = time.perf_counter()
+
     print(
         "\n[0/9] Domain + Intent classification..."
     )
 
-    classification = classify(question)
+    classification = classify(
+        question
+    )
+
+    performance[
+        "classification_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
+    )
 
     print(
         "Domain:",
@@ -228,15 +340,55 @@ def run_pipeline(
         jurisdiction,
     )
 
-    print("=" * 80)
     print(
-        "HACKGRID -- FULL EVIDENCE-AWARE PIPELINE"
+        "Execution Mode:",
+        "DEMO" if demo_mode else "FULL",
     )
+
     print("=" * 80)
 
-    primary_domain = classification.get("domain") or classification.get("primary_domain")
-    secondary = classification.get("secondary_domains", [])
-    detected_domains = ([primary_domain] if primary_domain else []) + (secondary if isinstance(secondary, list) else [])
+    print(
+        "HACKGRID -- "
+        + (
+            "COMPACT DEMO"
+            if demo_mode
+            else "FULL"
+        )
+        + " EVIDENCE-AWARE PIPELINE"
+    )
+
+    print("=" * 80)
+
+    primary_domain = (
+        classification.get("domain")
+        or classification.get(
+            "primary_domain"
+        )
+    )
+
+    secondary = classification.get(
+        "secondary_domains",
+        [],
+    )
+
+    detected_domains = (
+        [primary_domain]
+        if primary_domain
+        else []
+    ) + (
+        secondary
+        if isinstance(
+            secondary,
+            list,
+        )
+        else []
+    )
+
+    # ========================================================
+    # 1. JURISDICTION-AWARE MULTI-KB RETRIEVAL
+    # ========================================================
+
+    t_stage = time.perf_counter()
 
     print(
         "\n[1/9] Jurisdiction-aware multi-KB retrieval..."
@@ -244,9 +396,19 @@ def run_pipeline(
 
     results = retrieve(
         question,
-        k=20,
+        k=primary_k,
         jurisdiction=jurisdiction,
         domains=detected_domains,
+    )
+
+    performance[
+        "retrieval_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
     )
 
     if not results:
@@ -256,41 +418,84 @@ def run_pipeline(
         )
 
     kb_distribution = {}
+
     for r in results:
-        k_name = r.get("kb") or r.get("metadata", {}).get("kb", "MAIN")
-        kb_distribution[k_name] = kb_distribution.get(k_name, 0) + 1
+
+        k_name = (
+            r.get("kb")
+            or r.get(
+                "metadata",
+                {},
+            ).get(
+                "kb",
+                "MAIN",
+            )
+        )
+
+        kb_distribution[k_name] = (
+            kb_distribution.get(
+                k_name,
+                0,
+            )
+            + 1
+        )
 
     print(
         f"Retrieved {len(results)} candidate "
-        f"evidence records for {jurisdiction}. KBs: {kb_distribution}"
+        f"evidence records for {jurisdiction}. "
+        f"KBs: {kb_distribution}"
     )
 
     # ========================================================
     # 1B. PRIMARY EVIDENCE RERANKING
     # ========================================================
 
+    t_stage = time.perf_counter()
+
     print(
         "\n[1B/9] Top-K reranking + evidence analysis..."
     )
 
-    evidence_ranking_pipeline = get_ranking_pipeline()
+    evidence_ranking_pipeline = (
+        get_ranking_pipeline()
+    )
 
     ranking_result = (
         evidence_ranking_pipeline.run(
             query=question,
+
             candidates=results,
-            final_top_k=8,
+
+            final_top_k=(
+                primary_rerank_top_k
+            ),
+
+            candidate_limit=(
+                primary_rerank_candidate_limit
+            ),
         )
     )
 
-    reranked_results = ranking_result[
-        "reranked_evidence"
-    ]
+    reranked_results = (
+        ranking_result[
+            "reranked_evidence"
+        ]
+    )
 
     if not reranked_results:
         raise RuntimeError(
             "Reranking returned no evidence."
         )
+
+    performance[
+        "reranking_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
+    )
 
     print(
         f"Reranked to {len(reranked_results)} "
@@ -307,13 +512,15 @@ def run_pipeline(
     # 1C. JURISDICTION-AWARE COUNTER EVIDENCE
     # ========================================================
 
+    t_stage = time.perf_counter()
+
     print(
         "\n[1C/9] Counter-evidence retrieval..."
     )
 
     counter_results = retrieve(
         counter_evidence_query,
-        k=20,
+        k=counter_k,
         jurisdiction=jurisdiction,
         domains=detected_domains,
     )
@@ -326,8 +533,16 @@ def run_pipeline(
     counter_ranking_result = (
         evidence_ranking_pipeline.run(
             query=counter_evidence_query,
+
             candidates=counter_results,
-            final_top_k=8,
+
+            final_top_k=(
+                counter_rerank_top_k
+            ),
+
+            candidate_limit=(
+                counter_rerank_candidate_limit
+            ),
         )
     )
 
@@ -335,6 +550,16 @@ def run_pipeline(
         counter_ranking_result[
             "reranked_evidence"
         ]
+    )
+
+    performance[
+        "counter_evidence_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
     )
 
     print(
@@ -366,8 +591,7 @@ def run_pipeline(
         )
 
     # ========================================================
-    # 1E. SUPPORTING / CONTRADICTING /
-    #     CONTEXTUAL EVIDENCE ANALYSIS
+    # 1E. SUPPORTING / CONTRADICTING / CONTEXTUAL
     # ========================================================
 
     print(
@@ -377,7 +601,7 @@ def run_pipeline(
     combined_analysis = analyze_evidence(
         candidates=combined_candidates,
         query=question,
-        final_top_k=8,
+        final_top_k=final_evidence_limit,
     )
 
     ranking_evidence_analysis = (
@@ -432,12 +656,35 @@ def run_pipeline(
         reverse=True,
     )
 
-    final_evidence = combined_candidates[:8]
+    final_evidence = (
+        combined_candidates[
+            :final_evidence_limit
+        ]
+    )
 
     if not final_evidence:
         raise RuntimeError(
             "Final evidence selection returned no evidence."
         )
+
+    if demo_mode:
+
+        for ev in final_evidence:
+
+            ev_text = str(
+                ev.get(
+                    "text",
+                    "",
+                )
+            ).strip()
+
+            if len(ev_text) > 1000:
+
+                ev["text"] = (
+                    ev_text[:1000]
+                    + "\n"
+                    "[Truncated for compact demo analysis]"
+                )
 
     print(
         f"Final evidence selected: "
@@ -445,6 +692,7 @@ def run_pipeline(
     )
 
     # Preserve existing RAG adapter contract.
+
     evidence_records = (
         adapt_retrieval_results(
             final_evidence
@@ -460,6 +708,8 @@ def run_pipeline(
     # 2. GPT-OSS EVIDENCE CLASSIFICATION
     # ========================================================
 
+    t_stage = time.perf_counter()
+
     print(
         "\n[2/9] GPT-OSS evidence classification..."
     )
@@ -468,31 +718,65 @@ def run_pipeline(
         classify_evidence(
             claim=question,
             evidence_records=evidence_records,
+            demo_mode=demo_mode,
         )
     )
 
     if (
-        evidence_classification.get("status")
+        evidence_classification.get(
+            "status"
+        )
         != "SUCCESS"
     ):
-        err_msg = evidence_classification.get("error") or evidence_classification.get("status")
-        print(f"Evidence classification failed: {err_msg}")
+
+        err_msg = (
+            evidence_classification.get(
+                "error"
+            )
+            or evidence_classification.get(
+                "status"
+            )
+        )
+
+        print(
+            f"Evidence classification failed: "
+            f"{err_msg}"
+        )
+
         raise RuntimeError(
-            f"Evidence classification failed: {err_msg}"
+            f"Evidence classification failed: "
+            f"{err_msg}"
         )
 
     validation = (
         validate_evidence_consistency(
-            classifications=evidence_classification,
-            evidence_records=evidence_records,
+            classifications=(
+                evidence_classification
+            ),
+            evidence_records=(
+                evidence_records
+            ),
         )
     )
 
     if not validation["valid"]:
+
         raise RuntimeError(
             "Evidence consistency validation failed: "
-            + str(validation["errors"])
+            + str(
+                validation["errors"]
+            )
         )
+
+    performance[
+        "evidence_classification_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
+    )
 
     print(
         "Evidence classification: PASS"
@@ -501,6 +785,8 @@ def run_pipeline(
     # ========================================================
     # 3. EVIDENCE ENGINE
     # ========================================================
+
+    t_stage = time.perf_counter()
 
     print(
         "\n[3/9] Evidence Engine..."
@@ -515,22 +801,40 @@ def run_pipeline(
 
     evidence_assessment = (
         evidence_engine.assess(
-            claims=[claim]
+            claims=[
+                claim
+            ]
         )
     )
 
-    evidence_dict = _assessment_to_dict(
-        evidence_assessment
+    evidence_dict = (
+        _assessment_to_dict(
+            evidence_assessment
+        )
+    )
+
+    performance[
+        "evidence_engine_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
     )
 
     print(
         "Evidence status:",
-        evidence_dict["overall_status"],
+        evidence_dict[
+            "overall_status"
+        ],
     )
 
     # ========================================================
     # 4. ABSENCE VERIFICATION
     # ========================================================
+
+    t_stage = time.perf_counter()
 
     print(
         "\n[4/9] Absence Verification..."
@@ -538,13 +842,17 @@ def run_pipeline(
 
     absence = build_absence_verification(
         claim=question,
+
         evidence_records=evidence_records,
+
         search_scope=(
             "HackGrid RAG knowledge base; "
             f"jurisdiction={jurisdiction}; "
-            "40-candidate jurisdiction-filtered retrieval "
+            f"{len(results)}-candidate "
+            "jurisdiction-filtered retrieval "
             "with reranking and counter-evidence search"
         ),
+
         authoritative_jurisdictions=[
             jurisdiction
         ],
@@ -556,25 +864,53 @@ def run_pipeline(
         )
     )
 
+    performance[
+        "absence_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
+    )
+
     # ========================================================
-    # 5. GAP ANALYSIS INPUT
+    # 5. GAP ANALYSIS
     # ========================================================
+
+    t_stage = time.perf_counter()
 
     print(
         "\n[5/9] Gap Analysis..."
     )
 
     gap_input = build_gap_input(
-        evidence_assessment=evidence_assessment,
+        evidence_assessment=(
+            evidence_assessment
+        ),
+
         absence_verifications=[
             absence_dict
         ],
+
         question=question,
+    )
+
+    performance[
+        "gap_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
     )
 
     # ========================================================
     # 6. EXISTING RISK + AUTHORITY ENGINE
     # ========================================================
+
+    t_stage = time.perf_counter()
 
     print(
         "\n[6/9] Risk Engine..."
@@ -587,18 +923,27 @@ def run_pipeline(
                 "General Evidence",
             )
         ),
+
         decision_impact=(
             DecisionImpact.REGULATORY
         ),
+
         consequence_score=85,
+
         authority_requirement=(
             AuthorityRequirement.SENIOR_AUTHORITY
         ),
+
         sensitive_information=True,
+
         external_action=True,
+
         production_change=False,
+
         legal_or_regulatory_interpretation=True,
+
         affects_public_safety=True,
+
         affects_critical_infrastructure=True,
     )
 
@@ -610,18 +955,22 @@ def run_pipeline(
                 evidence_assessment.overall_confidence,
             ),
         ),
+
         factual_claims=len(
             evidence_classification.get(
                 "classifications",
                 [],
             )
         ),
+
         supported_claims=(
             evidence_assessment.supporting_count
         ),
+
         unsupported_claims=len(
             evidence_assessment.missing_evidence
         ),
+
         hallucination_risk=max(
             0.0,
             min(
@@ -630,13 +979,16 @@ def run_pipeline(
                 - evidence_assessment.overall_confidence,
             ),
         ),
+
         novel_situation=False,
     )
 
     risk_assessment = (
         assess_with_evidence_engine(
             decision_context=risk_context,
-            evidence_assessment=evidence_assessment,
+            evidence_assessment=(
+                evidence_assessment
+            ),
             ai_analysis=ai_analysis,
         )
     )
@@ -645,6 +997,16 @@ def run_pipeline(
         risk_assessment_to_dict(
             risk_assessment
         )
+    )
+
+    performance[
+        "risk_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
     )
 
     print(
@@ -657,6 +1019,8 @@ def run_pipeline(
     # ========================================================
     # 7. FINAL GPT-OSS SYNTHESIS
     # ========================================================
+
+    t_stage = time.perf_counter()
 
     print(
         "\n[7/9] Final GPT-OSS synthesis..."
@@ -673,7 +1037,19 @@ def run_pipeline(
             ],
             gap_input=gap_input,
             risk_assessment=risk_dict,
+            demo_mode=demo_mode,
+            counter_evidence_analysis=ranking_evidence_analysis,
         )
+    )
+
+    performance[
+        "synthesis_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
     )
 
     # ========================================================
@@ -709,16 +1085,20 @@ def run_pipeline(
                 "claim_id": claim_item.get(
                     "claim_id"
                 ),
+
                 "claim": claim_item.get(
                     "claim"
                 ),
+
                 "status": claim_item.get(
                     "status"
                 ),
+
                 "evidence_ids": claim_item.get(
                     "evidence_ids",
                     [],
                 ),
+
                 "confidence": claim_item.get(
                     "confidence",
                     0.0,
@@ -730,28 +1110,43 @@ def run_pipeline(
     # 9. AUDIT
     # ========================================================
 
+    t_stage = time.perf_counter()
+
     print(
         "\n[9/9] Writing audit trail..."
     )
 
     audit_record = create_audit_record(
         question=question,
+
         model="openai/gpt-oss-120b",
+
         retrieved_evidence=evidence_records,
-        evidence_classification=evidence_classification,
+
+        evidence_classification=(
+            evidence_classification
+        ),
+
         evidence_assessment=evidence_dict,
+
         absence_verification=[
             absence_dict
         ],
+
         gap_analysis=gap_input,
+
         risk_assessment=risk_dict,
+
         final_synthesis=final,
+
         claim_evidence_mappings=mappings,
+
         human_review_required=(
             risk_dict[
                 "human_review_required"
             ]
         ),
+
         final_decision=(
             "PENDING_HUMAN_REVIEW"
             if risk_dict[
@@ -759,10 +1154,31 @@ def run_pipeline(
             ]
             else "SYSTEM_RECOMMENDATION"
         ),
+        notes=notes or [],
     )
 
     audit_id = append_audit_record(
         audit_record
+    )
+
+    performance[
+        "audit_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
+    )
+
+    performance[
+        "total_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_start
+        ) * 1000,
+        2,
     )
 
     # ========================================================
@@ -772,29 +1188,48 @@ def run_pipeline(
     return {
         "question": question,
 
+        "execution_mode": (
+            "DEMO"
+            if demo_mode
+            else "FULL"
+        ),
+
+        "execution_config": (
+            execution_config
+        ),
+
+        "performance": performance,
+
         # Selected jurisdiction
         "jurisdiction": jurisdiction,
 
         "jurisdiction_sources": {
-            "selected_jurisdiction": jurisdiction,
-            "included_jurisdictions": (
-                [
-                    jurisdiction,
-                    "International",
-                ]
+            "selected_jurisdiction": (
+                jurisdiction
             ),
+
+            "included_jurisdictions": [
+                jurisdiction,
+                "International",
+            ],
         },
 
         # Domain + intent
         "query_analysis": classification,
 
-        # Original retrieval
-        "retrieval_candidates": len(results),
+        # Original retrieval count
+        "retrieval_candidates": len(
+            results
+        ),
 
         # Primary reranking
-        "reranked_evidence": reranked_results,
+        "reranked_evidence": (
+            reranked_results[:3]
+            if demo_mode
+            else reranked_results
+        ),
 
-        # Counter-evidence
+        # Counter evidence
         "counter_evidence_query": (
             counter_evidence_query
         ),
@@ -804,7 +1239,13 @@ def run_pipeline(
         ),
 
         "counter_evidence": (
-            counter_reranked_results
+            counter_reranked_results[:2]
+            if demo_mode
+            else counter_reranked_results
+        ),
+
+        "counter_evidence_analysis": (
+            final.get("counter_evidence", [])
         ),
 
         # Evidence analysis
@@ -813,16 +1254,26 @@ def run_pipeline(
         ),
 
         # Final evidence passed downstream
-        "retrieval": evidence_records,
+        "retrieval": (
+            evidence_records[:4]
+            if demo_mode
+            else evidence_records
+        ),
 
         # Existing pipeline
-        "classification": evidence_classification,
+        "classification": (
+            evidence_classification
+        ),
 
         "validation": validation,
 
-        "evidence_assessment": evidence_dict,
+        "evidence_assessment": (
+            evidence_dict
+        ),
 
-        "absence_verification": absence_dict,
+        "absence_verification": (
+            absence_dict
+        ),
 
         "gap_analysis": gap_input,
 
@@ -830,9 +1281,13 @@ def run_pipeline(
 
         "final_synthesis": final,
 
-        "claim_evidence_mappings": mappings,
+        "claim_evidence_mappings": (
+            mappings
+        ),
 
         "governance": governance,
+
+        "notes": notes or [],
 
         "audit_id": audit_id,
     }
@@ -847,6 +1302,7 @@ def main():
     result = run_pipeline(
         QUESTION,
         jurisdiction="India",
+        demo_mode=False,
     )
 
     # ========================================================
@@ -907,7 +1363,7 @@ def main():
 
     print(
         "Audit ID:",
-        result["audit_id"]
+        result["audit_id"],
     )
 
     print(

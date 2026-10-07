@@ -1,8 +1,17 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from .audit.recorder import load_audit_records
+from .audit.recorder import (
+    append_review_event,
+    apply_review_overlay,
+    get_all_latest_review_events,
+    get_latest_review_event,
+    load_audit_records,
+)
 from .demo_scenarios.library import get_scenarios
 
 
@@ -10,6 +19,13 @@ router = APIRouter(
     prefix="/api/audits",
     tags=["Audit Trail"],
 )
+
+
+class ReviewActionRequest(BaseModel):
+    action: str = Field(..., description="Action: APPROVED, MODIFIED, or REJECTED")
+    modification: Optional[str] = Field(None, description="Mandatory qualification text for MODIFIED")
+    reason: Optional[str] = Field(None, description="Mandatory explanation text for REJECTED")
+    reviewer: Optional[str] = Field("Human reviewer", description="Reviewer label")
 
 
 def _build_scenario_map() -> Dict[str, Dict[str, Any]]:
@@ -28,7 +44,11 @@ def _build_scenario_map() -> Dict[str, Dict[str, Any]]:
     return scenario_map
 
 
-def enrich_audit_record(r: Dict[str, Any], scenario_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def enrich_audit_record(
+    r: Dict[str, Any],
+    scenario_map: Dict[str, Dict[str, Any]],
+    review_event: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     q = (r.get("question") or "").strip()
     sc = scenario_map.get(q)
 
@@ -92,6 +112,9 @@ def enrich_audit_record(r: Dict[str, Any], scenario_map: Dict[str, Dict[str, Any
     gap = r.get("gap_analysis") or {}
     assessment = synth.get("assessment") or gap.get("verdict") or "Analysis completed."
 
+    # Apply effective overlay
+    overlaid = apply_review_overlay(r, review_event)
+
     return {
         "audit_id": r.get("audit_id"),
         "timestamp": r.get("timestamp"),
@@ -103,7 +126,13 @@ def enrich_audit_record(r: Dict[str, Any], scenario_map: Dict[str, Dict[str, Any
         "risk_score": risk_score,
         "evidence_status": evidence_status,
         "human_review_required": human_review,
-        "final_decision": r.get("final_decision", "PENDING_HUMAN_REVIEW"),
+        "human_review_status": overlaid.get("human_review_status", "PENDING"),
+        "human_action": overlaid.get("human_action", ""),
+        "final_decision": overlaid.get("final_decision", "PENDING_HUMAN_REVIEW"),
+        "review_timestamp": overlaid.get("review_timestamp"),
+        "reviewer_modifications": overlaid.get("reviewer_modifications"),
+        "reviewer_reason": overlaid.get("reviewer_reason"),
+        "reviewer": overlaid.get("reviewer") or overlaid.get("human_reviewer", ""),
         "evidence_count": len(retrieved),
         "claims_count": len(synth.get("claims") or r.get("claim_evidence_mappings") or []),
         "assessment_excerpt": str(assessment)[:180],
@@ -119,6 +148,7 @@ def get_all_audits(
     risk_level: Optional[str] = Query(None, description="Filter by risk level"),
     evidence_status: Optional[str] = Query(None, description="Filter by evidence status"),
     human_review_required: Optional[bool] = Query(None, description="Filter by human review requirement"),
+    human_review_status: Optional[str] = Query(None, description="Filter by human review status (PENDING, APPROVED, MODIFIED, REJECTED)"),
     audit_type: Optional[str] = Query(None, description="Filter by audit type"),
     scenario_id: Optional[str] = Query(None, description="Filter by scenario ID"),
     sort: Optional[str] = Query("newest", description="Sort order: newest, oldest, highest_risk, lowest_risk"),
@@ -127,8 +157,16 @@ def get_all_audits(
 ):
     raw_records = load_audit_records()
     scenario_map = _build_scenario_map()
+    latest_reviews = get_all_latest_review_events()
 
-    enriched = [enrich_audit_record(r, scenario_map) for r in raw_records]
+    enriched = [
+        enrich_audit_record(
+            r,
+            scenario_map,
+            latest_reviews.get(r.get("audit_id")),
+        )
+        for r in raw_records
+    ]
 
     # Calculate real overview metrics
     total_audits = len(enriched)
@@ -175,6 +213,12 @@ def get_all_audits(
 
     if human_review_required is not None:
         filtered = [a for a in filtered if a["human_review_required"] == human_review_required]
+
+    if human_review_status and human_review_status.lower() != "all":
+        filtered = [
+            a for a in filtered
+            if str(a.get("human_review_status", "")).lower() == human_review_status.lower()
+        ]
 
     if audit_type and audit_type.lower() != "all":
         filtered = [a for a in filtered if a["audit_type"].lower() == audit_type.lower()]
@@ -230,13 +274,87 @@ def get_audit_detail(audit_id: str):
             detail=f"Audit record '{audit_id}' not found.",
         )
 
+    latest_review = get_latest_review_event(audit_id)
     scenario_map = _build_scenario_map()
-    enriched_summary = enrich_audit_record(target_record, scenario_map)
+    enriched_summary = enrich_audit_record(target_record, scenario_map, latest_review)
 
     full_payload = dict(target_record)
+    full_payload = apply_review_overlay(full_payload, latest_review)
     full_payload["scenario"] = enriched_summary.get("scenario")
     full_payload["domain"] = enriched_summary.get("domain")
     full_payload["jurisdiction"] = enriched_summary.get("jurisdiction")
     full_payload["audit_type"] = enriched_summary.get("audit_type")
 
     return full_payload
+
+
+@router.post("/{audit_id}/review")
+def review_audit(
+    audit_id: str,
+    request: ReviewActionRequest,
+):
+    raw_records = load_audit_records()
+    target_record = None
+    for r in raw_records:
+        if r.get("audit_id") == audit_id:
+            target_record = r
+            break
+
+    if target_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Audit record '{audit_id}' not found.",
+        )
+
+    action = (request.action or "").strip().upper()
+    if action not in ("APPROVED", "MODIFIED", "REJECTED", "ESCALATED", "DEFERRED", "INVESTIGATE"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid action '{request.action}'. Action must be one of: APPROVED, MODIFIED, REJECTED, ESCALATED, DEFERRED, INVESTIGATE.",
+        )
+
+    modification_text = None
+    reason_text = None
+
+    if action == "MODIFIED":
+        if not request.modification or not request.modification.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Action MODIFIED requires non-empty 'modification' text.",
+            )
+        modification_text = request.modification.strip()
+
+    elif action in ("REJECTED", "ESCALATED", "DEFERRED", "INVESTIGATE"):
+        if action == "REJECTED" and (not request.reason or not request.reason.strip()):
+            raise HTTPException(
+                status_code=422,
+                detail="Action REJECTED requires non-empty 'reason' text.",
+            )
+        reason_text = request.reason.strip() if request.reason else None
+
+    reviewer_label = (request.reviewer or "").strip() or "Human reviewer"
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    review_event = {
+        "audit_id": audit_id,
+        "timestamp": timestamp,
+        "human_action": action,
+        "final_decision": action,
+        "reviewer": reviewer_label,
+        "reviewer_modifications": modification_text,
+        "reviewer_reason": reason_text,
+    }
+    append_review_event(review_event)
+
+    effective_state = apply_review_overlay(target_record, review_event)
+
+    return {
+        "audit_id": audit_id,
+        "human_review_required": effective_state["human_review_required"],
+        "human_review_status": effective_state["human_review_status"],
+        "human_action": effective_state["human_action"],
+        "final_decision": effective_state["final_decision"],
+        "review_timestamp": effective_state["review_timestamp"],
+        "reviewer_modifications": effective_state["reviewer_modifications"],
+        "reviewer_reason": effective_state["reviewer_reason"],
+    }

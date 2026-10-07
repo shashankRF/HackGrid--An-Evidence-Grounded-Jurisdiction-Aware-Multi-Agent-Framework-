@@ -92,3 +92,33 @@ class AuditRecord:
             "final_decision": self.final_decision,
             "notes": self.notes,
         }
+
+
+@dataclass
+class ReviewEvent:
+
+    audit_id: str
+
+    timestamp: str
+
+    human_action: str
+
+    final_decision: str
+
+    reviewer: str = "Human reviewer"
+
+    reviewer_modifications: str | None = None
+
+    reviewer_reason: str | None = None
+
+    def to_dict(self) -> Dict[str, Any]:
+
+        return {
+            "audit_id": self.audit_id,
+            "timestamp": self.timestamp,
+            "human_action": self.human_action,
+            "final_decision": self.final_decision,
+            "reviewer": self.reviewer,
+            "reviewer_modifications": self.reviewer_modifications,
+            "reviewer_reason": self.reviewer_reason,
+        }

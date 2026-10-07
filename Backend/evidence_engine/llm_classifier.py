@@ -644,6 +644,7 @@ def _check_evidence_coverage(
 def classify_evidence(
     claim: str,
     evidence_records: List[Dict[str, Any]],
+    demo_mode: bool = False,
 ) -> Dict[str, Any]:
     """
     Classify retrieved evidence against a claim using GPT-OSS.
@@ -673,13 +674,26 @@ def classify_evidence(
         }
 
     # --------------------------------------------------------
-    # Ensure evidence IDs exist before calling the model.
+    # Compact demo constraints: max 4 records, ~1000 chars text
     # --------------------------------------------------------
-
-    for index, record in enumerate(evidence_records, start=1):
-
-        if "evidence_id" not in record:
-            record["evidence_id"] = f"EV-{index:03d}"
+    if demo_mode:
+        bounded_records = []
+        for index, record in enumerate(evidence_records[:4], start=1):
+            r = dict(record)
+            if "evidence_id" not in r:
+                r["evidence_id"] = f"EV-{index:03d}"
+            r_text = str(r.get("text", "")).strip()
+            if len(r_text) > 1000:
+                r["text"] = r_text[:1000] + "\n[Truncated for compact demo analysis]"
+            bounded_records.append(r)
+        evidence_records = bounded_records
+        max_tokens = 1500
+    else:
+        # Ensure evidence IDs exist before calling the model.
+        for index, record in enumerate(evidence_records, start=1):
+            if "evidence_id" not in record:
+                record["evidence_id"] = f"EV-{index:03d}"
+        max_tokens = CLASSIFIER_MAX_TOKENS
 
     # --------------------------------------------------------
     # Build prompt.
@@ -716,7 +730,7 @@ def classify_evidence(
 
             temperature=CLASSIFIER_TEMPERATURE,
 
-            max_tokens=CLASSIFIER_MAX_TOKENS,
+            max_tokens=max_tokens,
         )
 
     except Exception as exc:
