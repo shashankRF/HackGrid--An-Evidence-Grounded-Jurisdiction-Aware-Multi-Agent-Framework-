@@ -12,7 +12,7 @@
 | **Embedding Model** | `BAAI/bge-m3` (Dense 1,024-dimensional vectors) | `rag/retrieval.py`, `rag/gptoss_backend.py` |
 | **Vector Search Engine** | FAISS (`IndexFlatIP` cosine similarity) | `rag/faiss_new.index` |
 | **Reasoning & Synthesis Model** | `openai/gpt-oss-120b` via Groq LPU API | `Backend/final_synthesis.py`, `rag/gptoss_backend.py` |
-| **Validated Knowledge Base** | 14,143 indexed regulatory and technical chunks | `rag/chunks_new.json` (72 verified source documents) |
+| **Validated Knowledge Base** | 14,813 total indexed chunks across 3 active KBs (Main: 14,143, Defence: 397, Maritime: 273) | `rag/chunks_new.json`, `rag/DEFENCE CHUNKS/`, `rag/MARITIME CHUNKS/` |
 | **Active Jurisdictions** | India, European Union, International / Standards | `rag/retrieval.py` (`JURISDICTION_PROFILES`) |
 | **Reranking Engine** | `BAAI/bge-reranker-v2-m3` with similarity score fallback | `Backend/evidence_reranking/reranker.py` |
 | **Evidence Engine** | Deterministic role classification & sufficiency verification | `Backend/evidence_engine/engine.py` |
@@ -258,10 +258,17 @@ flowchart LR
 ```
 
 ### Technical Specification
-* **Model**: `BAAI/bge-m3` loaded via `sentence-transformers` on CPU/device.
-* **Embeddings File**: `rag/embeddings_new.npy` (57.9 MB, 14,143 vectors $\times$ 1,024 float32).
-* **Index File**: `rag/faiss_new.index` (57.9 MB, `IndexFlatIP` inner product on L2-normalized vectors).
-* **Dynamic Candidate Expansion**: To prevent false negatives during geographic filtering, FAISS retrieves $\max(K \times 10, 100)$ candidates before pruning.
+* **Model**: `BAAI/bge-m3` loaded via `sentence-transformers` on CPU/device (shared singleton across all knowledge bases).
+* **Embeddings Files**:
+  * Main: `rag/embeddings_new.npy` (57.9 MB, 14,143 vectors $\times$ 1,024 float32).
+  * Defence: `rag/DEFENCE CHUNKS/defence_embeddings.npy` (1.6 MB, 397 vectors $\times$ 1,024 float32).
+  * Maritime: `rag/MARITIME CHUNKS/maritime_embeddings.npy` (1.1 MB, 273 vectors $\times$ 1,024 float32).
+* **Index Files**: Compiled FAISS `IndexFlatIP` indices on L2-normalized dense vectors:
+  * Main: `rag/faiss_new.index` (14,143 vectors)
+  * Defence: `rag/DEFENCE CHUNKS/defence_faiss.index` (397 vectors)
+  * Maritime: `rag/MARITIME CHUNKS/maritime_faiss.index` (273 vectors)
+* **Total Indexed Corpus**: 14,813 verified dense vectors across 3 operational indices.
+* **Dynamic Candidate Expansion & Quota Pooling**: Retrieves $\max(K \times 10, 100)$ candidates per active KB, enforces proportional quota pooling (Main $\ge 40-50\%$, domain KBs $\ge 2-4$ candidates), and annotates source provenance (`kb`: `"MAIN"` | `"DEFENCE"` | `"MARITIME"`).
 
 ---
 
@@ -269,28 +276,29 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    subgraph Knowledge_Bases [HackGrid Knowledge Bases]
+    subgraph Knowledge_Bases [HackGrid Multi-Domain Knowledge Bases]
         MainKB[Main Production KB<br/>14,143 Chunks<br/>Status: ACTIVE LIVE]
-        MaritimeKB[Maritime KB<br/>Directory: rag/MARITIME CHUNKS<br/>Status: In Repo / Fallback to Main]
-        DefenceKB[Defence KB<br/>Directory: rag/DEFENCE CHUNKS<br/>Status: In Repo / Fallback to Main]
+        MaritimeKB[Maritime Domain KB<br/>273 Chunks<br/>Status: ACTIVE LIVE]
+        DefenceKB[Defence Domain KB<br/>397 Chunks<br/>Status: ACTIVE LIVE]
     end
 
-    MainKB --> UnifiedRetriever[Multi-KB Retriever Engine]
-    MaritimeKB -.->|When populated| UnifiedRetriever
-    DefenceKB -.->|When populated| UnifiedRetriever
+    MainKB --> UnifiedRetriever[Unified Multi-KB Retriever Engine]
+    MaritimeKB -->|Domain Routing + Quota Pooling| UnifiedRetriever
+    DefenceKB -->|Domain Routing + Quota Pooling| UnifiedRetriever
     UnifiedRetriever --> Pipeline[HackGrid Production Pipeline]
 ```
 
 ### Knowledge Base Inventory
 
-| Knowledge Base | Chunks | FAISS Index | Chunk File | Live Pipeline Status |
-|---|---|---|---|---|
-| **Main KB** | **14,143** | `rag/faiss_new.index` | `rag/chunks_new.json` | **ACTIVE (Canonical Production Knowledge Base)** |
-| **Maritime KB** | 0 | `rag/MARITIME CHUNKS/` | `maritime_chunks.json` | *Available in repository; falls back to Main KB in live retrieval* |
-| **Defence KB** | 0 | `rag/DEFENCE CHUNKS/` | `defence_chunks.json` | *Available in repository; falls back to Main KB in live retrieval* |
+| Knowledge Base | Chunks | Vectors | Dimension | FAISS Index | Chunk File | Live Pipeline Status |
+|---|---|---|---|---|---|---|
+| **Main KB** | **14,143** | 14,143 | 1,024 | `rag/faiss_new.index` | `rag/chunks_new.json` | **ACTIVE (Canonical Production KB — Always Searched)** |
+| **Defence KB** | **397** | 397 | 1,024 | `rag/DEFENCE CHUNKS/defence_faiss.index` | `defence_chunks.json` | **ACTIVE (Domain-Routed: DRDO, Drone Rules, NATO UAS)** |
+| **Maritime KB** | **273** | 273 | 1,024 | `rag/MARITIME CHUNKS/maritime_faiss.index` | `maritime_chunks.json` | **ACTIVE (Domain-Routed: IMO MSC, NOSDCP, AIS Protocols)** |
+| **Total Corpus** | **14,813** | **14,813** | **1,024** | **3 Active FAISS Indices** | **3 Correlated Corpora** | **UNIFIED MULTI-DOMAIN RETRIEVAL** |
 
 > [!NOTE]
-> `rag/multi_kb_retriever.py` provides multi-index federation logic. If domain indices are empty or unbuilt, the system deterministically executes retrieval against the Main KB (which already contains extensive maritime, defence, telecom, and statutory documents).
+> `rag/multi_kb_retriever.py` provides multi-index federation logic, quota-based candidate pooling (MAIN guaranteed $\ge 40-50\%$, domain KBs guaranteed $\ge 2-4$ candidates), and source provenance tracking (`kb`: `"MAIN"` | `"DEFENCE"` | `"MARITIME"`). Domain queries seamlessly aggregate candidates across relevant indices with strict attribution.
 
 ---
 
@@ -315,9 +323,9 @@ Every chunk in `rag/chunks_new.json` adheres to a strict JSON structure:
 }
 ```
 
-### Chunk Corpus Breakdown (14,143 Chunks Total)
+### Chunk Corpus Breakdown (14,813 Chunks Total)
 
-* **By Regulatory Category**:
+* **Main Knowledge Base (14,143 Chunks)**:
   * `3gpp` (Technical Specifications): 6,032 chunks
   * `DoT_Rules` (Indian Department of Telecommunications): 2,561 chunks
   * `EU Rules` (European Union Directives & Regulations): 1,364 chunks
@@ -328,6 +336,17 @@ Every chunk in `rag/chunks_new.json` adheres to a strict JSON structure:
   * `MTCTE Regulations` (Mandatory Testing & Certification): 452 chunks
   * `ITU_Rules_Framework` (International Telecommunication Union): 322 chunks
   * `DPDP Acts` (Digital Personal Data Protection Act): 127 chunks
+
+* **Defence Knowledge Base (397 Chunks)**:
+  * `DRDO_ToT_Policy2025.pdf`: 245 chunks (Transfer of Technology, licensing, defence R&D)
+  * `Drone Rules 2021.pdf`: 84 chunks (Indian UAS zoning, classification, certification)
+  * `UAS_CONEMP NATO.pdf`: 68 chunks (NATO Concept of Employment for Unmanned Aircraft Systems)
+
+* **Maritime Knowledge Base (273 Chunks)**:
+  * `NOSDCP Circular 01 - 2025 INDIA.pdf`: 121 chunks (National Oil Spill Disaster Contingency Plan)
+  * `MSC.570(109) IMO.pdf`: 62 chunks (IMO Maritime Safety Committee resolutions)
+  * `MSC.74(69).pdf`: 48 chunks (IMO performance standards for navigational equipment & AIS)
+  * `A.1106(29) 2015.pdf`: 42 chunks (Revised guidelines for shipborne automatic identification)
 * **By Jurisdiction Distribution**:
   * `International`: 6,354 chunks
   * `India`: 5,510 chunks
@@ -581,7 +600,7 @@ Every transaction through HackGrid generates an immutable record stored in `Back
 | **API Framework** | FastAPI | 0.142.2 | High-performance RESTful API with Pydantic validation |
 | **ASGI Server** | Uvicorn | 0.54.0 | ASGI web server hosting FastAPI on `127.0.0.1:8000` |
 | **Dense Embeddings** | `sentence-transformers` | 6.1.0 | Loads `BAAI/bge-m3` embedding model |
-| **Vector Database** | `faiss-cpu` | 1.15.1 | In-memory similarity search over 14,143 vectors |
+| **Vector Database** | `faiss-cpu` | 1.15.1 | In-memory similarity search over 14,813 vectors across 3 KBs |
 | **Reranker** | `FlagEmbedding` | 1.4.2 | `BAAI/bge-reranker-v2-m3` cross-encoder reranking |
 | **LLM Provider** | Groq SDK | 1.7.0 | High-speed LPU inference client |
 | **Generative Model** | `openai/gpt-oss-120b` | Latest | Reasoning, classification, and final assessment synthesis |
@@ -874,7 +893,7 @@ A representative sanitized response payload from `POST /api/query`:
 
 | Capability | Conventional RAG | Generic Multi-Agent LLMs | HackGrid Decision Intelligence |
 |---|---|---|---|
-| **Primary Grounding** | Unranked text chunks | Model conversational context | **Verified 14,143-chunk statutory/standards KB** |
+| **Primary Grounding** | Unranked text chunks | Model conversational context | **Verified 14,813-chunk statutory/standards corpus across 3 KBs** |
 | **Jurisdiction Awareness** | None (cross-jurisdiction contamination) | Prompt-guided (unreliable) | **Deterministic profile-gated retrieval filter** |
 | **Counter-Evidence** | None (pure similarity bias) | Rare / Ad-hoc | **Active counter-query synthesis & signal scoring** |
 | **Absence Handling** | Assumes search miss = non-existence | Hallucinates non-existence | **Conservative `ABSENCE_NOT_ESTABLISHED` protocol** |
@@ -938,9 +957,8 @@ HackGrid includes an integrated benchmark and scorecard evaluation harness (`Bac
 
 ## 36. Limitations
 
-* **Corpus Boundedness**: HackGrid's factual horizon is bounded by its 14,143 indexed chunks. Novel circulars issued after indexing require manual ingestion.
+* **Corpus Boundedness**: HackGrid's factual horizon is bounded by its 14,813 indexed chunks across the Main, Defence, and Maritime repositories. Novel circulars issued after indexing require manual ingestion.
 * **Probabilistic Synthesis**: While grounded in evidence, language-model synthesis can exhibit phrasing variance across identical contexts.
-* **Domain KB Integration**: The dedicated Defence and Maritime chunk indices exist physically as repository scaffolds but currently fall back to the Main KB in unified live querying.
 * **Non-Legal Finality**: HackGrid provides technical and regulatory **decision support**. It does not substitute for qualified legal counsel or statutory government gazettes.
 
 ---
@@ -948,14 +966,14 @@ HackGrid includes an integrated benchmark and scorecard evaluation harness (`Bac
 ## 37. Future Roadmap
 
 ```
-CURRENT (v1.0 Baseline)
-  ├── 14,143-chunk Main Knowledge Base active
+CURRENT (v1.1 Multi-Domain Operational)
+  ├── 14,813 total chunks across 3 active Knowledge Bases (Main: 14,143, Defence: 397, Maritime: 273)
+  ├── Unified multi-KB retrieval with quota candidate pooling & source provenance
   ├── 10-stage production orchestrator with GPT-OSS 120B
   ├── Deterministic Risk Engine & Governance Layer
   └── Interactive Web Console & Forensic Audit Trail
 
-NEAR TERM (v1.1)
-  ├── Live compilation and active routing for dedicated Maritime & Defence KB indices
+NEAR TERM (v1.2)
   ├── Hybrid sparse/dense retrieval (BM25 + BGE-M3 reciprocal rank fusion)
   └── Multi-reviewer cryptographic digital signatures on audit entries
 
@@ -1063,10 +1081,10 @@ curl -X POST "http://127.0.0.1:8000/api/query" `
 ## 42. Reproducibility
 
 To reproduce HackGrid's exact findings:
-1. Ensure the canonical 14,143-chunk index artifacts are present in `rag/`:
-   * `chunks_new.json` (SHA256 verified)
-   * `embeddings_new.npy` (Dense 1,024-dim BGE-M3 matrix)
-   * `faiss_new.index` (Inner product index)
+1. Ensure the active knowledge base index artifacts are present in `rag/`:
+   * Main KB: `chunks_new.json` (14,143 chunks), `embeddings_new.npy`, `faiss_new.index`
+   * Defence KB: `rag/DEFENCE CHUNKS/` (397 chunks, `defence_faiss.index`)
+   * Maritime KB: `rag/MARITIME CHUNKS/` (273 chunks, `maritime_faiss.index`)
 2. Use Python 3.10+ with `sentence-transformers==6.1.0` and `faiss-cpu==1.15.1`.
 3. Set `temperature=0.2` in `Backend/final_synthesis.py` and `rag/gptoss_backend.py`.
 4. Run the automated evaluation scorecard:
@@ -1104,8 +1122,8 @@ HackGrid is explicitly designed as a **decision-support framework**, not an auto
 | **Append-Only Audit Trail** | ✅ **Implemented** | Persistent JSONL serialization in `Backend/audit/recorder.py` |
 | **Scenario Lab (7 Incidents)** | ✅ **Implemented** | 7 multi-step simulation scenarios in `demo_scenarios/library.py` |
 | **Web Console & Audit UI** | ✅ **Implemented** | Forensic single-page application in `Frontend/index.html` |
-| **Dedicated Maritime KB Index** | 🟡 **Experimental** | Physical directory scaffold present; falls back to Main KB |
-| **Dedicated Defence KB Index** | 🟡 **Experimental** | Physical directory scaffold present; falls back to Main KB |
+| **Dedicated Maritime KB Index** | ✅ **Implemented** | 273 chunks in FAISS (`maritime_faiss.index`), live domain routing & quota pooling |
+| **Dedicated Defence KB Index** | ✅ **Implemented** | 397 chunks in FAISS (`defence_faiss.index`), live domain routing & quota pooling |
 | **Automated Regulatory Ingestion**| 🔵 **Planned** | Webhook-driven statutory gazette re-indexing scheduled for v2.0 |
 
 ---

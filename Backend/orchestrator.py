@@ -234,18 +234,19 @@ def run_pipeline(
     )
     print("=" * 80)
 
-    # ========================================================
-    # 1. JURISDICTION-AWARE RAG RETRIEVAL
-    # ========================================================
+    primary_domain = classification.get("domain") or classification.get("primary_domain")
+    secondary = classification.get("secondary_domains", [])
+    detected_domains = ([primary_domain] if primary_domain else []) + (secondary if isinstance(secondary, list) else [])
 
     print(
-        "\n[1/9] Jurisdiction-aware RAG retrieval..."
+        "\n[1/9] Jurisdiction-aware multi-KB retrieval..."
     )
 
     results = retrieve(
         question,
         k=20,
         jurisdiction=jurisdiction,
+        domains=detected_domains,
     )
 
     if not results:
@@ -254,9 +255,14 @@ def run_pipeline(
             f"{jurisdiction} jurisdiction."
         )
 
+    kb_distribution = {}
+    for r in results:
+        k_name = r.get("kb") or r.get("metadata", {}).get("kb", "MAIN")
+        kb_distribution[k_name] = kb_distribution.get(k_name, 0) + 1
+
     print(
         f"Retrieved {len(results)} candidate "
-        f"evidence records for {jurisdiction}."
+        f"evidence records for {jurisdiction}. KBs: {kb_distribution}"
     )
 
     # ========================================================
@@ -309,6 +315,7 @@ def run_pipeline(
         counter_evidence_query,
         k=20,
         jurisdiction=jurisdiction,
+        domains=detected_domains,
     )
 
     print(

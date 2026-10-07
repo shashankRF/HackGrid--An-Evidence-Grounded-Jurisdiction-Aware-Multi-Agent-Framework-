@@ -69,9 +69,13 @@ def build_evidence_record(
     metadata = result.get("metadata", {}) or {}
 
     evidence_id = f"EV-{index:03d}"
+    kb_name = result.get("kb") or metadata.get("kb") or "MAIN"
+    title_str = metadata.get("document") or metadata.get("source_file") or result.get("title") or f"Record {index}"
 
     return {
         "evidence_id": evidence_id,
+        "kb": kb_name,
+        "title": title_str,
 
         "retrieval": {
             "rank": result.get("rank", index),
@@ -79,6 +83,7 @@ def build_evidence_record(
         },
 
         "provenance": {
+            "kb": kb_name,
             "document": metadata.get("document"),
             "source_file": metadata.get("source_file"),
             "folder": metadata.get("folder"),

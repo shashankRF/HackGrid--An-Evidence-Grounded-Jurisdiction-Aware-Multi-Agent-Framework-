@@ -35,52 +35,43 @@ JURISDICTION_PROFILES = {
 
 
 # ============================================================
-# LOAD KNOWLEDGE BASE
+# UNIFIED RETRIEVER DELEGATION (SINGLETON)
 # ============================================================
 
-print("Loading HackGrid knowledge base...")
+_retriever = None
 
-with open(CHUNKS_FILE, "r", encoding="utf-8") as f:
-    chunks = json.load(f)
+def _get_unified():
+    global _retriever
+    if _retriever is None:
+        from rag.multi_kb_retriever import get_unified_retriever
+        _retriever = get_unified_retriever()
+    return _retriever
 
-print(f"Loaded {len(chunks)} chunks.")
+class _LazyChunks:
+    def __len__(self):
+        return len(_get_unified().chunks.get("MAIN", []))
+    def __getitem__(self, idx):
+        return _get_unified().chunks.get("MAIN", [])[idx]
+    def __iter__(self):
+        return iter(_get_unified().chunks.get("MAIN", []))
 
+class _LazyIndex:
+    @property
+    def ntotal(self):
+        return _get_unified().indexes["MAIN"].ntotal
+    @property
+    def d(self):
+        return _get_unified().indexes["MAIN"].d
+    def search(self, *args, **kwargs):
+        return _get_unified().indexes["MAIN"].search(*args, **kwargs)
 
-# ============================================================
-# LOAD FAISS
-# ============================================================
+class _LazyModel:
+    def encode(self, *args, **kwargs):
+        return _get_unified().model.encode(*args, **kwargs)
 
-print("Loading FAISS index...")
-
-index = faiss.read_index(str(FAISS_FILE))
-
-print(f"FAISS vectors: {index.ntotal}")
-
-
-# ============================================================
-# LOAD BGE-M3
-# ============================================================
-
-print("Loading BGE-M3...")
-
-embedding_model = SentenceTransformer(
-    MODEL_NAME,
-    device="cpu",
-)
-
-print("BGE-M3 loaded.")
-
-
-# ============================================================
-# VALIDATION
-# ============================================================
-
-if len(chunks) != index.ntotal:
-    raise RuntimeError(
-        f"Knowledge base mismatch: "
-        f"{len(chunks)} chunks vs "
-        f"{index.ntotal} FAISS vectors."
-    )
+chunks = _LazyChunks()
+index = _LazyIndex()
+embedding_model = _LazyModel()
 
 
 # ============================================================
@@ -127,9 +118,10 @@ def retrieve(
     query,
     k=8,
     jurisdiction=None,
+    domains=None,
 ):
     """
-    Retrieve evidence from the HackGrid knowledge base.
+    Jurisdiction-aware multi-KB evidence retrieval.
 
     Parameters
     ----------
@@ -140,129 +132,29 @@ def retrieve(
         Number of final evidence records.
 
     jurisdiction : str | None
-        If None:
-            Legacy unrestricted retrieval.
+        If "India": Only India + International evidence.
+        If "European Union": Only European Union + International evidence.
 
-        If "India":
-            Only India + International evidence.
-
-        If "European Union":
-            Only European Union + International evidence.
+    domains : list | str | None
+        Domain hints for specialized KB activation (DEFENCE, MARITIME).
+        MAIN KB is always searched regardless of domains.
     """
+    from rag.multi_kb_retriever import get_unified_retriever
 
-    query = str(query).strip()
-
-    if not query:
+    query_str = str(query).strip()
+    if not query_str:
         return []
 
     if jurisdiction is not None:
         _validate_jurisdiction(jurisdiction)
 
-    # --------------------------------------------------------
-    # QUERY EMBEDDING
-    # --------------------------------------------------------
-
-    query_embedding = embedding_model.encode(
-        [query],
-        normalize_embeddings=True,
+    retriever = get_unified_retriever()
+    return retriever.retrieve_unified(
+        query=query_str,
+        k=k,
+        jurisdiction=jurisdiction,
+        domains=domains,
     )
-
-    query_embedding = np.asarray(
-        query_embedding,
-        dtype="float32",
-    )
-
-    # --------------------------------------------------------
-    # DETERMINE SEARCH SIZE
-    # --------------------------------------------------------
-
-    if jurisdiction is None:
-        candidate_k = min(
-            len(chunks),
-            max(k, 1),
-        )
-    else:
-        # Search broadly first because jurisdiction filtering
-        # happens after FAISS retrieval.
-        candidate_k = min(
-            len(chunks),
-            max(k * 10, 100),
-        )
-
-    distances, indices = index.search(
-        query_embedding,
-        candidate_k,
-    )
-
-    # --------------------------------------------------------
-    # JURISDICTION FILTER
-    # --------------------------------------------------------
-
-    allowed_jurisdictions = None
-
-    if jurisdiction is not None:
-        allowed_jurisdictions = (
-            JURISDICTION_PROFILES[jurisdiction]
-        )
-
-    # --------------------------------------------------------
-    # BUILD RESULTS
-    # --------------------------------------------------------
-
-    results = []
-
-    for original_rank, (distance, idx) in enumerate(
-        zip(
-            distances[0],
-            indices[0],
-        ),
-        start=1,
-    ):
-
-        if idx == -1:
-            continue
-
-        chunk = chunks[idx]
-
-        metadata = chunk.get(
-            "metadata",
-            {},
-        )
-
-        chunk_jurisdiction = _get_jurisdiction(
-            metadata
-        )
-
-        # ----------------------------------------------------
-        # JURISDICTION FILTER
-        # ----------------------------------------------------
-
-        if allowed_jurisdictions is not None:
-
-            if (
-                chunk_jurisdiction
-                not in allowed_jurisdictions
-            ):
-                continue
-
-        # ----------------------------------------------------
-        # APPEND RESULT
-        # ----------------------------------------------------
-
-        results.append(
-            {
-                "rank": len(results) + 1,
-                "original_rank": original_rank,
-                "distance": float(distance),
-                "text": chunk["text"],
-                "metadata": metadata,
-            }
-        )
-
-        if len(results) >= k:
-            break
-
-    return results
 
 
 # ============================================================

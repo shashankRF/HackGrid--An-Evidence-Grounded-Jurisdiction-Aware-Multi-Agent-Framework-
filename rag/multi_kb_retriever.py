@@ -1,24 +1,29 @@
 """
 HackGrid Multi-KB Retrieval Engine
 
-Searches:
-    1. MAIN KB
-    2. MARITIME KB
-    3. DEFENCE KB
+Unified multi-domain retrieval supporting:
+    1. MAIN KB (14,143 chunks - BAAI/bge-m3, FAISS, always searched)
+    2. DEFENCE KB (397 chunks - DRDO, Drone Rules, NATO UAS)
+    3. MARITIME KB (273 chunks - IMO AIS, Maritime Safety, NOSDCP)
 
-The Main KB is ALWAYS searched.
-
-Domain KBs are additional evidence sources.
-They never replace the Main KB.
-
-This module does NOT modify or rebuild any existing index.
+Core Invariants:
+- MAIN KB is NEVER bypassed; it participates in every retrieval.
+- Domain KBs are queried when the domain classifier indicates domain relevance.
+- Shared BGE-M3 singleton prevents redundant memory/CPU usage.
+- Strict source provenance ('kb': 'MAIN' | 'DEFENCE' | 'MARITIME') attached to every chunk.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 import numpy as np
 import faiss
-
 from sentence_transformers import SentenceTransformer
 
 
@@ -29,627 +34,367 @@ from sentence_transformers import SentenceTransformer
 BASE_DIR = Path(__file__).resolve().parent
 
 MAIN_DIR = BASE_DIR
-
+DEFENCE_DIR = BASE_DIR / "DEFENCE CHUNKS"
 MARITIME_DIR = BASE_DIR / "MARITIME CHUNKS"
 
-DEFENCE_DIR = BASE_DIR / "DEFENCE CHUNKS"
-
-
-# ============================================================
-# INDEX FILES
-# ============================================================
-
 INDEX_CONFIG = {
-
     "MAIN": {
         "index": MAIN_DIR / "faiss_new.index",
         "chunks": MAIN_DIR / "chunks_new.json",
         "embeddings": MAIN_DIR / "embeddings_new.npy",
     },
-
+    "DEFENCE": {
+        "index": DEFENCE_DIR / "defence_faiss.index",
+        "chunks": DEFENCE_DIR / "defence_chunks.json",
+        "embeddings": DEFENCE_DIR / "defence_embeddings.npy",
+    },
     "MARITIME": {
         "index": MARITIME_DIR / "maritime_faiss.index",
         "chunks": MARITIME_DIR / "maritime_chunks.json",
         "embeddings": MARITIME_DIR / "maritime_embeddings.npy",
     },
+}
 
-    "DEFENCE": {
-        "index": DEFENCE_DIR / "defence_faiss.index",
-        "chunks": DEFENCE_DIR / "defence_chunks.json",
-        "embeddings": DEFENCE_DIR / "defence_embeddings.npy",
-    }
+MODEL_NAME = "BAAI/bge-m3"
+
+JURISDICTION_PROFILES = {
+    "India": {"India", "International"},
+    "European Union": {"European Union", "International"},
 }
 
 
 # ============================================================
-# MODEL
-# ============================================================
-
-MODEL_NAME = "BAAI/bge-m3"
-
-
-# ============================================================
-# RETRIEVAL PARAMETERS
-# ============================================================
-
-DEFAULT_CANDIDATES_PER_KB = 15
-
-DEFAULT_FINAL_K = 10
-
-
-# ============================================================
-# MULTI-KB RETRIEVER
+# MULTI-KB RETRIEVER CLASS
 # ============================================================
 
 class MultiKBRetriever:
+    """
+    Unified multi-domain retriever for HackGrid.
+    """
 
     def __init__(self):
-
-        print()
         print("=" * 70)
-        print("HACKGRID MULTI-KB RETRIEVER")
+        print("HACKGRID MULTI-KB RETRIEVER INITIALIZING")
         print("=" * 70)
 
+        print(f"Loading shared {MODEL_NAME} model on CPU...")
         self.model = SentenceTransformer(
             MODEL_NAME,
-            device="cpu"
+            device="cpu",
         )
+        print("BGE-M3 loaded.")
 
-        self.indexes = {}
-
-        self.chunks = {}
-
-        self.embeddings = {}
+        self.indexes: Dict[str, Any] = {}
+        self.chunks: Dict[str, List[Dict[str, Any]]] = {}
+        self.embeddings: Dict[str, Any] = {}
 
         self._load_all_kbs()
 
-
-    # ========================================================
-    # LOAD KBs
-    # ========================================================
-
     def _load_all_kbs(self):
+        for kb_name, cfg in INDEX_CONFIG.items():
+            index_path = cfg["index"]
+            chunks_path = cfg["chunks"]
+            emb_path = cfg["embeddings"]
 
-        for kb_name, config in INDEX_CONFIG.items():
+            if not chunks_path.exists():
+                raise FileNotFoundError(f"{kb_name} chunks missing: {chunks_path}")
 
-            print()
-            print(f"Loading {kb_name} KB...")
+            with open(chunks_path, "r", encoding="utf-8") as f:
+                chunk_list = json.load(f)
 
-            index_path = config["index"]
+            if not emb_path.exists():
+                raise FileNotFoundError(f"{kb_name} embeddings missing: {emb_path}")
 
-            chunks_path = config["chunks"]
+            emb = np.load(emb_path, mmap_mode="r")
 
-            embeddings_path = config["embeddings"]
+            # Check or auto-build FAISS index
+            if not index_path.exists() or index_path.stat().st_size == 0:
+                print(f"[REPAIR] Building FAISS IndexFlatIP for {kb_name} from embeddings...")
+                idx = faiss.IndexFlatIP(emb.shape[1])
+                idx.add(np.asarray(emb, dtype="float32"))
+                faiss.write_index(idx, str(index_path))
+            else:
+                try:
+                    idx = faiss.read_index(str(index_path))
+                except Exception as exc:
+                    print(f"[REPAIR] Re-reading FAISS failed for {kb_name}: {exc}. Rebuilding...")
+                    idx = faiss.IndexFlatIP(emb.shape[1])
+                    idx.add(np.asarray(emb, dtype="float32"))
+                    faiss.write_index(idx, str(index_path))
 
-
-            # ------------------------------------------------
-            # Check files
-            # ------------------------------------------------
-
-            for path in [
-                index_path,
-                chunks_path,
-                embeddings_path
-            ]:
-
-                if not path.exists():
-
-                    raise FileNotFoundError(
-                        f"{kb_name} KB missing file:\n{path}"
-                    )
-
-
-            # ------------------------------------------------
-            # Load FAISS
-            # ------------------------------------------------
-
-            index = faiss.read_index(
-                str(index_path)
-            )
-
-
-            # ------------------------------------------------
-            # Load chunks
-            # ------------------------------------------------
-
-            with open(
-                chunks_path,
-                "r",
-                encoding="utf-8"
-            ) as f:
-
-                chunks = json.load(f)
-
-
-            # ------------------------------------------------
-            # Load embeddings
-            # ------------------------------------------------
-
-            embeddings = np.load(
-                embeddings_path,
-                mmap_mode="r"
-            )
-
-
-            # ------------------------------------------------
-            # Validate
-            # ------------------------------------------------
-
-            if index.ntotal != len(chunks):
-
+            if idx.ntotal != len(chunk_list):
                 raise ValueError(
-                    f"{kb_name}: FAISS vectors "
-                    f"({index.ntotal}) != chunks "
-                    f"({len(chunks)})"
+                    f"{kb_name}: FAISS count ({idx.ntotal}) != chunks ({len(chunk_list)})"
                 )
 
+            self.indexes[kb_name] = idx
+            self.chunks[kb_name] = chunk_list
+            self.embeddings[kb_name] = emb
 
-            if len(embeddings) != len(chunks):
+            print(f"  [{kb_name}] Chunks: {len(chunk_list)} | Vectors: {idx.ntotal} | Dim: {idx.d} -> READY")
 
-                raise ValueError(
-                    f"{kb_name}: embeddings "
-                    f"({len(embeddings)}) != chunks "
-                    f"({len(chunks)})"
-                )
-
-
-            if index.d != embeddings.shape[1]:
-
-                raise ValueError(
-                    f"{kb_name}: FAISS dimension "
-                    f"({index.d}) != embedding dimension "
-                    f"({embeddings.shape[1]})"
-                )
-
-
-            self.indexes[kb_name] = index
-
-            self.chunks[kb_name] = chunks
-
-            self.embeddings[kb_name] = embeddings
-
-
-            print(
-                f"  Vectors:    {index.ntotal}"
-            )
-
-            print(
-                f"  Dimension:  {index.d}"
-            )
-
-            print(
-                f"  Chunks:     {len(chunks)}"
-            )
-
-
-        print()
         print("=" * 70)
-        print("ALL KNOWLEDGE BASES LOADED")
+        print("ALL KNOWLEDGE BASES OPERATIONAL")
         print("=" * 70)
 
+    def _embed_query(self, query: str) -> np.ndarray:
+        vec = self.model.encode([query], normalize_embeddings=True)
+        return np.asarray(vec, dtype="float32")
 
-    # ========================================================
-    # EMBED QUERY
-    # ========================================================
+    def _get_allowed_jurisdictions(self, jurisdiction: Optional[str]) -> Optional[Set[str]]:
+        if not jurisdiction:
+            return None
+        return JURISDICTION_PROFILES.get(jurisdiction, {jurisdiction, "International"})
 
-    def _embed_query(self, query):
-
-        embedding = self.model.encode(
-            [query],
-            convert_to_numpy=True,
-            normalize_embeddings=True
-        )
-
-        return embedding.astype(
-            "float32"
-        )
-
-
-    # ========================================================
-    # SEARCH ONE KB
-    # ========================================================
-
-    def _search_kb(
+    def _search_single_kb(
         self,
-        query_vector,
-        kb_name,
-        top_k
-    ):
+        query_vec: np.ndarray,
+        kb_name: str,
+        k: int,
+        allowed_jurisdictions: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        idx = self.indexes[kb_name]
+        chunk_list = self.chunks[kb_name]
 
-        index = self.indexes[kb_name]
-
-        chunks = self.chunks[kb_name]
-
-
-        distances, ids = index.search(
-            query_vector,
-            top_k
-        )
-
+        # Fetch extra if filtering by jurisdiction
+        fetch_k = min(len(chunk_list), k * 5 if allowed_jurisdictions else k)
+        distances, ids = idx.search(query_vec, max(fetch_k, 1))
 
         results = []
-
-
-        for rank, (
-            score,
-            vector_id
-        ) in enumerate(
-            zip(
-                distances[0],
-                ids[0]
-            ),
-            start=1
-        ):
-
-            if vector_id < 0:
+        for rank, (score, v_id) in enumerate(zip(distances[0], ids[0]), start=1):
+            if v_id < 0 or v_id >= len(chunk_list):
                 continue
 
+            chunk = chunk_list[v_id]
+            meta = chunk.get("metadata", {}) or {}
 
-            chunk = chunks[vector_id]
+            c_jur = meta.get("jurisdiction")
+            if allowed_jurisdictions and c_jur and c_jur not in allowed_jurisdictions:
+                continue
 
+            # Tag KB provenance cleanly
+            meta["kb"] = kb_name
 
-            result = {
-
+            results.append({
                 "kb": kb_name,
-
                 "rank_in_kb": rank,
-
                 "score": float(score),
+                "distance": float(score),
+                "text": chunk.get("text") or chunk.get("content", ""),
+                "metadata": meta,
+                "vector_id": int(v_id),
+            })
 
-                "vector_id": int(vector_id),
-
-                "chunk": chunk
-            }
-
-
-            results.append(
-                result
-            )
-
+            if len(results) >= k:
+                break
 
         return results
 
+    def retrieve_unified(
+        self,
+        query: str,
+        k: int = 8,
+        jurisdiction: Optional[str] = None,
+        domains: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Multi-domain retrieval adhering to candidate pooling quotas.
+        MAIN KB is ALWAYS included.
+        """
+        query_str = (query or "").strip()
+        if not query_str:
+            return []
 
-    # ========================================================
-    # SEARCH MULTIPLE KBs
-    # ========================================================
+        # Determine target KBs
+        selected_kbs = ["MAIN"]
+        if domains:
+            if isinstance(domains, str):
+                domains = [domains]
+            for d in domains:
+                d_clean = str(d).upper().strip()
+                if "DEFENCE" in d_clean or "DRONE" in d_clean:
+                    if "DEFENCE" not in selected_kbs:
+                        selected_kbs.append("DEFENCE")
+                if "MARITIME" in d_clean or "PORT" in d_clean or "VESSEL" in d_clean or "SEA" in d_clean or "OIL" in d_clean:
+                    if "MARITIME" not in selected_kbs:
+                        selected_kbs.append("MARITIME")
+
+        query_vec = self._embed_query(query_str)
+        allowed_jur = self._get_allowed_jurisdictions(jurisdiction)
+
+        # Quota allocation
+        # MAIN always gets a generous slice
+        per_kb_fetch = max(k * 2, 15)
+        candidates_by_kb: Dict[str, List[Dict[str, Any]]] = {}
+
+        for kb in selected_kbs:
+            candidates_by_kb[kb] = self._search_single_kb(
+                query_vec=query_vec,
+                kb_name=kb,
+                k=per_kb_fetch,
+                allowed_jurisdictions=allowed_jur,
+            )
+
+        # Quota-based pooling guaranteeing representation for all participating KBs
+        final_items: List[Dict[str, Any]] = []
+        seen_keys: Set[Any] = set()
+
+        if len(selected_kbs) == 1:
+            for item in candidates_by_kb.get("MAIN", []):
+                meta = item.get("metadata", {})
+                dedupe_key = (
+                    item["kb"],
+                    meta.get("chunk_id") or meta.get("document") or item["text"][:100],
+                )
+                if dedupe_key not in seen_keys:
+                    seen_keys.add(dedupe_key)
+                    final_items.append(item)
+                if len(final_items) >= k:
+                    break
+        else:
+            # Multi-KB: calculate quota per KB
+            # MAIN is guaranteed >= 40-50% of k
+            main_quota = max(k // 2, 3)
+            # Domain KBs share the rest, each guaranteed >= 2 items
+            domain_quota = max((k - main_quota) // (len(selected_kbs) - 1), 2)
+
+            quota_picks: List[Dict[str, Any]] = []
+
+            # 1. Guaranteed MAIN picks
+            for item in candidates_by_kb.get("MAIN", [])[:main_quota]:
+                quota_picks.append(item)
+
+            # 2. Guaranteed Domain picks
+            for kb in selected_kbs:
+                if kb != "MAIN":
+                    for item in candidates_by_kb.get(kb, [])[:domain_quota]:
+                        quota_picks.append(item)
+
+            # 3. Add quota picks to final_items with deduplication
+            for item in quota_picks:
+                meta = item.get("metadata", {})
+                dedupe_key = (
+                    item["kb"],
+                    meta.get("chunk_id") or meta.get("document") or item["text"][:100],
+                )
+                if dedupe_key not in seen_keys:
+                    seen_keys.add(dedupe_key)
+                    final_items.append(item)
+
+            # 4. Fill any remainder up to k from best remaining across all pools
+            if len(final_items) < k:
+                remaining: List[Dict[str, Any]] = []
+                for kb in selected_kbs:
+                    for item in candidates_by_kb.get(kb, []):
+                        meta = item.get("metadata", {})
+                        dedupe_key = (
+                            item["kb"],
+                            meta.get("chunk_id") or meta.get("document") or item["text"][:100],
+                        )
+                        if dedupe_key not in seen_keys:
+                            remaining.append(item)
+
+                remaining.sort(key=lambda x: x["score"], reverse=True)
+                for item in remaining:
+                    meta = item.get("metadata", {})
+                    dedupe_key = (
+                        item["kb"],
+                        meta.get("chunk_id") or meta.get("document") or item["text"][:100],
+                    )
+                    if dedupe_key not in seen_keys:
+                        seen_keys.add(dedupe_key)
+                        final_items.append(item)
+                    if len(final_items) >= k:
+                        break
+
+        # Re-sort final_items by score so downstream ranking receives them in semantic order
+        final_items.sort(key=lambda x: x["score"], reverse=True)
+
+        final_list = []
+        for rank, item in enumerate(final_items[:k], start=1):
+            final_list.append({
+                "rank": rank,
+                "original_rank": item.get("rank_in_kb", rank),
+                "distance": item["distance"],
+                "score": item["score"],
+                "text": item["text"],
+                "metadata": item["metadata"],
+                "kb": item["kb"],
+            })
+
+        return final_list
 
     def search(
         self,
-        query,
-        domains=None,
-        candidates_per_kb=DEFAULT_CANDIDATES_PER_KB,
-        final_k=DEFAULT_FINAL_K
-    ):
+        query: str,
+        domains: Optional[List[str]] = None,
+        candidates_per_kb: int = 15,
+        final_k: int = 10,
+        jurisdiction: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        High-level search API returning structured results and metadata.
+        """
+        results = self.retrieve_unified(
+            query=query,
+            k=final_k,
+            jurisdiction=jurisdiction,
+            domains=domains,
+        )
 
-        if not query or not query.strip():
-
-            raise ValueError(
-                "Query cannot be empty."
-            )
-
-
-        # ----------------------------------------------------
-        # MAIN is ALWAYS searched
-        # ----------------------------------------------------
-
-        selected_kbs = [
-            "MAIN"
-        ]
-
-
-        # ----------------------------------------------------
-        # Add requested domain KBs
-        # ----------------------------------------------------
-
+        selected_kbs = ["MAIN"]
         if domains:
-
-            if isinstance(
-                domains,
-                str
-            ):
-
-                domains = [
-                    domains
-                ]
-
-
-            for domain in domains:
-
-                domain = domain.upper().strip()
-
-
-                if domain in [
-                    "MARITIME",
-                    "DEFENCE"
-                ]:
-
-                    if domain not in selected_kbs:
-
-                        selected_kbs.append(
-                            domain
-                        )
-
-
-        # ----------------------------------------------------
-        # Embed query
-        # ----------------------------------------------------
-
-        query_vector = self._embed_query(
-            query
-        )
-
-
-        # ----------------------------------------------------
-        # Search each selected KB
-        # ----------------------------------------------------
-
-        all_results = []
-
-
-        for kb_name in selected_kbs:
-
-            results = self._search_kb(
-                query_vector,
-                kb_name,
-                candidates_per_kb
-            )
-
-
-            all_results.extend(
-                results
-            )
-
-
-        # ----------------------------------------------------
-        # Sort globally by semantic score
-        # ----------------------------------------------------
-
-        all_results.sort(
-            key=lambda x: x["score"],
-            reverse=True
-        )
-
-
-        # ----------------------------------------------------
-        # Deduplicate
-        # ----------------------------------------------------
-
-        deduplicated = []
-
-        seen = set()
-
-
-        for result in all_results:
-
-            chunk = result["chunk"]
-
-
-            # Try stable ID first
-            chunk_id = chunk.get(
-                "chunk_id"
-            )
-
-
-            source = chunk.get(
-                "source_file",
-                chunk.get(
-                    "document",
-                    ""
-                )
-            )
-
-
-            page = chunk.get(
-                "page",
-                chunk.get(
-                    "page_number",
-                    ""
-                )
-            )
-
-
-            text = chunk.get(
-                "text",
-                chunk.get(
-                    "content",
-                    ""
-                )
-            )
-
-
-            dedupe_key = (
-                result["kb"],
-                chunk_id,
-                source,
-                page,
-                text[:200]
-            )
-
-
-            if dedupe_key in seen:
-
-                continue
-
-
-            seen.add(
-                dedupe_key
-            )
-
-
-            deduplicated.append(
-                result
-            )
-
-
-        # ----------------------------------------------------
-        # Final results
-        # ----------------------------------------------------
-
-        final_results = deduplicated[
-            :final_k
-        ]
-
-
-        # ----------------------------------------------------
-        # Add global rank
-        # ----------------------------------------------------
-
-        for rank, result in enumerate(
-            final_results,
-            start=1
-        ):
-
-            result["global_rank"] = rank
-
+            for d in domains:
+                d_u = str(d).upper()
+                if "DEFENCE" in d_u and "DEFENCE" not in selected_kbs:
+                    selected_kbs.append("DEFENCE")
+                if "MARITIME" in d_u and "MARITIME" not in selected_kbs:
+                    selected_kbs.append("MARITIME")
 
         return {
-
             "query": query,
-
             "searched_kbs": selected_kbs,
+            "candidate_count": len(results),
+            "final_count": len(results),
+            "results": results,
+        }
 
-            "candidate_count": len(
-                all_results
-            ),
-
-            "final_count": len(
-                final_results
-            ),
-
-            "results": final_results
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Health and status report for all knowledge bases.
+        """
+        return {
+            "status": "READY",
+            "MAIN": {
+                "status": "READY",
+                "chunks": len(self.chunks.get("MAIN", [])),
+                "vectors": self.indexes["MAIN"].ntotal if "MAIN" in self.indexes else 0,
+                "dimension": self.indexes["MAIN"].d if "MAIN" in self.indexes else 0,
+            },
+            "DEFENCE": {
+                "status": "READY",
+                "chunks": len(self.chunks.get("DEFENCE", [])),
+                "vectors": self.indexes["DEFENCE"].ntotal if "DEFENCE" in self.indexes else 0,
+                "dimension": self.indexes["DEFENCE"].d if "DEFENCE" in self.indexes else 0,
+            },
+            "MARITIME": {
+                "status": "READY",
+                "chunks": len(self.chunks.get("MARITIME", [])),
+                "vectors": self.indexes["MARITIME"].ntotal if "MARITIME" in self.indexes else 0,
+                "dimension": self.indexes["MARITIME"].d if "MARITIME" in self.indexes else 0,
+            },
+            "unified_retriever": "READY",
         }
 
 
 # ============================================================
-# SIMPLE TEST MODE
+# SINGLETON ACCESSOR
 # ============================================================
 
-if __name__ == "__main__":
+_unified_retriever_instance: Optional[MultiKBRetriever] = None
 
-    import argparse
-
-
-    parser = argparse.ArgumentParser(
-        description="HackGrid Multi-KB Retriever"
-    )
-
-
-    parser.add_argument(
-        "--query",
-        required=True
-    )
-
-
-    parser.add_argument(
-        "--domains",
-        nargs="*",
-        default=[]
-    )
-
-
-    parser.add_argument(
-        "--candidates",
-        type=int,
-        default=15
-    )
-
-
-    parser.add_argument(
-        "--top-k",
-        type=int,
-        default=10
-    )
-
-
-    args = parser.parse_args()
-
-
-    retriever = MultiKBRetriever()
-
-
-    output = retriever.search(
-
-        query=args.query,
-
-        domains=args.domains,
-
-        candidates_per_kb=args.candidates,
-
-        final_k=args.top_k
-    )
-
-
-    print()
-    print("=" * 70)
-    print("SEARCH RESULT")
-    print("=" * 70)
-
-    print(
-        f"Query: {output['query']}"
-    )
-
-    print(
-        f"KBs searched: "
-        f"{', '.join(output['searched_kbs'])}"
-    )
-
-    print(
-        f"Candidates: "
-        f"{output['candidate_count']}"
-    )
-
-    print(
-        f"Final evidence: "
-        f"{output['final_count']}"
-    )
-
-
-    for result in output["results"]:
-
-        chunk = result["chunk"]
-
-        print()
-        print("-" * 70)
-
-        print(
-            f"Global Rank: "
-            f"{result['global_rank']}"
-        )
-
-        print(
-            f"KB: "
-            f"{result['kb']}"
-        )
-
-        print(
-            f"Score: "
-            f"{result['score']:.4f}"
-        )
-
-        print(
-            f"Source: "
-            f"{chunk.get('source_file', 'N/A')}"
-        )
-
-        print(
-            f"Page: "
-            f"{chunk.get('page', 'N/A')}"
-        )
-
-        print(
-            f"Chunk ID: "
-            f"{chunk.get('chunk_id', 'N/A')}"
-        )
-
-        print()
-
-        print(
-            chunk.get(
-                "text",
-                chunk.get(
-                    "content",
-                    ""
-                )
-            )[:1000]
-        )
+def get_unified_retriever() -> MultiKBRetriever:
+    global _unified_retriever_instance
+    if _unified_retriever_instance is None:
+        _unified_retriever_instance = MultiKBRetriever()
+    return _unified_retriever_instance

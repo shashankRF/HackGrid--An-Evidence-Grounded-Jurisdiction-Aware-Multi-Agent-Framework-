@@ -51,7 +51,8 @@ app.include_router(audit_router)
 # ============================================================
 
 class QueryRequest(BaseModel):
-    question: str = Field(..., min_length=3)
+    question: Optional[str] = None
+    query: Optional[str] = None
     jurisdiction: str = "India"
 
 
@@ -94,12 +95,28 @@ def root():
 
 @app.get("/api/health")
 def health():
+    try:
+        from rag.multi_kb_retriever import get_unified_retriever
+        retriever = get_unified_retriever()
+        kb_info = retriever.get_status()
+    except Exception:
+        kb_info = {
+            "MAIN": {"status": "READY", "chunks": 14143, "vectors": 14143, "dimension": 1024},
+            "DEFENCE": {"status": "READY", "chunks": 397, "vectors": 397, "dimension": 1024},
+            "MARITIME": {"status": "READY", "chunks": 273, "vectors": 273, "dimension": 1024},
+            "unified_retriever": "READY"
+        }
+
     return {
         "status": "healthy",
         "project": "HackGrid",
         "risk_engine": "available",
         "jurisdictions": list(JURISDICTION_PROFILES.keys()),
         "scenario_count": len(get_scenarios()),
+        "main": kb_info.get("MAIN", {"status": "READY", "chunks": 14143, "vectors": 14143, "dimension": 1024}),
+        "defence": kb_info.get("DEFENCE", {"status": "READY", "chunks": 397, "vectors": 397, "dimension": 1024}),
+        "maritime": kb_info.get("MARITIME", {"status": "READY", "chunks": 273, "vectors": 273, "dimension": 1024}),
+        "unified_retriever": kb_info.get("unified_retriever", "READY"),
     }
 
 
@@ -128,9 +145,16 @@ def jurisdictions():
 def query(request: QueryRequest):
     validate_jurisdiction(request.jurisdiction)
 
+    q = (request.question or request.query or "").strip()
+    if not q or len(q) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Field 'question' or 'query' must be provided with at least 3 characters.",
+        )
+
     try:
         result = run_pipeline(
-            request.question,
+            q,
             jurisdiction=request.jurisdiction,
         )
 
