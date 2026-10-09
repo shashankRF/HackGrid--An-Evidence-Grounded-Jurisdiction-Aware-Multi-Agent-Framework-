@@ -36,62 +36,67 @@ payload = {
 data = json.dumps(payload).encode('utf-8')
 req = urllib.request.Request(URL, data=data, headers={"Content-Type": "application/json"})
 
-print("[TEST] Sending test query to /api/query...")
-try:
-    with urllib.request.urlopen(req, timeout=240) as resp:
-        result = json.loads(resp.read().decode('utf-8'))
-        print("\n[SUCCESS] Response received from pipeline!")
+def _run_live_test():
+    print("[TEST] Sending test query to /api/query...")
+    try:
+        with urllib.request.urlopen(req, timeout=240) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            print("\n[SUCCESS] Response received from pipeline!")
+    
+            synth = result.get("final_synthesis", {})
+            print("\n================ FINAL SYNTHESIS ASSESSMENT ================")
+            print(synth.get("assessment", ""))
+    
+            print("\n================ REGULATORY IMPLICATIONS ================")
+            for idx, ri in enumerate(synth.get("regulatory_implications", []), 1):
+                print(f"[{idx}] {json.dumps(ri, indent=2, ensure_ascii=False)}")
+    
+            print("\n================ COUNTER-EVIDENCE ================")
+            for idx, ce in enumerate(synth.get("counter_evidence", []), 1):
+                print(f"[{idx}] {json.dumps(ce, indent=2, ensure_ascii=False)}")
+    
+            # Verification Assertions
+            reg_str = json.dumps(synth.get("regulatory_implications", []))
+            assessment_str = synth.get("assessment", "")
+    
+            # 1. No unconditional overclaims
+            overclaim_words = [
+                "Mandatory regulatory and reporting obligations apply",
+                "Mandatory reporting applies",
+                "The operator must report this incident"
+            ]
+            for ow in overclaim_words:
+                assert ow.lower() not in reg_str.lower(), f"Overclaim found in regulatory implications: {ow}"
+                assert ow.lower() not in assessment_str.lower(), f"Overclaim found in assessment: {ow}"
+            print("\n[PASS] No mandatory overclaims detected!")
+    
+            # 2. Counter-evidence is present and reaches final synthesis
+            counter_ev = synth.get("counter_evidence", [])
+            assert len(counter_ev) > 0, "Counter-evidence is empty!"
+            for ce in counter_ev:
+                assert "affected_conclusion" in ce and ce["affected_conclusion"], f"Missing affected_conclusion in {ce}"
+                assert "confidence_impact" in ce and ce["confidence_impact"], f"Missing confidence_impact in {ce}"
+                assert "evidence_ids" in ce, f"Missing evidence_ids in {ce}"
+            print(f"[PASS] Counter-evidence populated with {len(counter_ev)} item(s) including affected_conclusion and confidence_impact!")
+    
+            # 3. Governance preserved
+            risk = result.get("risk_assessment", {})
+            print(f"[GOVERNANCE] Risk level: {risk.get('risk_level')}, Human review: {synth.get('human_review_required')}")
+            assert synth.get("human_review_required") is True, "Human review requirement must be preserved!"
+            print("[PASS] Governance invariants preserved!")
+    
+    except Exception as e:
+        print(f"\n[ERROR] Pipeline query failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    
+    # ============================================================
+    # UNIT TESTS FOR DETERMINISTIC GUARDRAILS
+    # ============================================================
 
-        synth = result.get("final_synthesis", {})
-        print("\n================ FINAL SYNTHESIS ASSESSMENT ================")
-        print(synth.get("assessment", ""))
+if __name__ == '__main__':
+    _run_live_test()
 
-        print("\n================ REGULATORY IMPLICATIONS ================")
-        for idx, ri in enumerate(synth.get("regulatory_implications", []), 1):
-            print(f"[{idx}] {json.dumps(ri, indent=2, ensure_ascii=False)}")
-
-        print("\n================ COUNTER-EVIDENCE ================")
-        for idx, ce in enumerate(synth.get("counter_evidence", []), 1):
-            print(f"[{idx}] {json.dumps(ce, indent=2, ensure_ascii=False)}")
-
-        # Verification Assertions
-        reg_str = json.dumps(synth.get("regulatory_implications", []))
-        assessment_str = synth.get("assessment", "")
-
-        # 1. No unconditional overclaims
-        overclaim_words = [
-            "Mandatory regulatory and reporting obligations apply",
-            "Mandatory reporting applies",
-            "The operator must report this incident"
-        ]
-        for ow in overclaim_words:
-            assert ow.lower() not in reg_str.lower(), f"Overclaim found in regulatory implications: {ow}"
-            assert ow.lower() not in assessment_str.lower(), f"Overclaim found in assessment: {ow}"
-        print("\n[PASS] No mandatory overclaims detected!")
-
-        # 2. Counter-evidence is present and reaches final synthesis
-        counter_ev = synth.get("counter_evidence", [])
-        assert len(counter_ev) > 0, "Counter-evidence is empty!"
-        for ce in counter_ev:
-            assert "affected_conclusion" in ce and ce["affected_conclusion"], f"Missing affected_conclusion in {ce}"
-            assert "confidence_impact" in ce and ce["confidence_impact"], f"Missing confidence_impact in {ce}"
-            assert "evidence_ids" in ce, f"Missing evidence_ids in {ce}"
-        print(f"[PASS] Counter-evidence populated with {len(counter_ev)} item(s) including affected_conclusion and confidence_impact!")
-
-        # 3. Governance preserved
-        risk = result.get("risk_assessment", {})
-        print(f"[GOVERNANCE] Risk level: {risk.get('risk_level')}, Human review: {synth.get('human_review_required')}")
-        assert synth.get("human_review_required") is True, "Human review requirement must be preserved!"
-        print("[PASS] Governance invariants preserved!")
-
-except Exception as e:
-    print(f"\n[ERROR] Pipeline query failed: {e}", file=sys.stderr)
-    sys.exit(1)
-
-
-# ============================================================
-# UNIT TESTS FOR DETERMINISTIC GUARDRAILS
-# ============================================================
 print("\n[TEST] Running comprehensive unit tests on _apply_regulatory_and_counter_guardrails...")
 import sys
 from pathlib import Path

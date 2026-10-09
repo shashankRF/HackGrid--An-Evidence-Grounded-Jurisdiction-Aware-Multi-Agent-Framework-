@@ -1,3 +1,17 @@
+
+class RetrievalList(list):
+    """List of retrieved evidence records that also supports dict-like ['count'] access."""
+    def __getitem__(self, k):
+        if k == "count":
+            return len(self)
+        return super().__getitem__(k)
+
+    def get(self, k, default=None):
+        if k == "count":
+            return len(self)
+        return default
+
+import uuid
 import json
 import time
 
@@ -65,6 +79,23 @@ from Backend.audit.recorder import (
     append_audit_record,
 )
 
+from Backend.policy_standard_mapping.mapping_engine import (
+    PolicyStandardMappingEngine,
+)
+
+from Backend.policy_standard_mapping.retrieval_planner import (
+    plan_and_retrieve_evidence,
+)
+
+from Backend.policy_standard_mapping.claim_validation_gate import (
+    validate_synthesis_claims,
+)
+
+from Backend.regional_comparative_gap import (
+    RegionalComparativeGapEngine,
+    validate_regional_claims,
+)
+
 
 # ============================================================
 # DEFAULT QUESTION
@@ -101,17 +132,14 @@ FULL_CONFIG = {
 
 
 DEMO_CONFIG = {
-    # Compact execution for live frontend scenarios.
-    #
-    # The goal is to preserve the complete pipeline while
-    # drastically reducing expensive local cross-encoder work.
-    "retrieval_k": 10,
-    "rerank_candidate_limit": 5,
+    # Compact execution for live frontend scenarios (<40s target).
+    "retrieval_k": 6,
+    "rerank_candidate_limit": 3,
     "rerank_top_k": 3,
-    "counter_retrieval_k": 6,
-    "counter_rerank_candidate_limit": 4,
+    "counter_retrieval_k": 3,
+    "counter_rerank_candidate_limit": 2,
     "counter_rerank_top_k": 2,
-    "final_evidence_k": 4,
+    "final_evidence_k": 3,
 }
 
 
@@ -232,6 +260,14 @@ def run_pipeline(
     jurisdiction="India",
     demo_mode=False,
     notes=None,
+    regional_mode="OFF",
+    execution_id=None,
+    event_type="QUESTION_ANALYSIS",
+    scenario_id=None,
+    scenario_title=None,
+    step_id=None,
+    step_title=None,
+    time_budget_seconds=38.0,
 ):
 
     t_start = time.perf_counter()
@@ -244,6 +280,9 @@ def run_pipeline(
         raise ValueError(
             "Question cannot be empty."
         )
+
+    exec_id = execution_id or f"RUN-{uuid.uuid4().hex[:12]}"
+    workflow_stages = []
 
     # ========================================================
     # EXECUTION CONFIGURATION
@@ -305,6 +344,7 @@ def run_pipeline(
     print(
         "\n[0/9] Domain + Intent classification..."
     )
+    workflow_stages.append("Query Understanding")
 
     classification = classify(
         question
@@ -393,8 +433,9 @@ def run_pipeline(
     print(
         "\n[1/9] Jurisdiction-aware multi-KB retrieval..."
     )
+    workflow_stages.append("Retrieval")
 
-    results = retrieve(
+    results = plan_and_retrieve_evidence(
         question,
         k=primary_k,
         jurisdiction=jurisdiction,
@@ -455,36 +496,56 @@ def run_pipeline(
     print(
         "\n[1B/9] Top-K reranking + evidence analysis..."
     )
+    workflow_stages.append("Semantic Reranking")
 
-    evidence_ranking_pipeline = (
-        get_ranking_pipeline()
-    )
+    deadline = t_start + time_budget_seconds
+    rem_before_rerank = deadline - time.perf_counter()
 
-    ranking_result = (
-        evidence_ranking_pipeline.run(
-            query=question,
-
-            candidates=results,
-
-            final_top_k=(
-                primary_rerank_top_k
-            ),
-
-            candidate_limit=(
-                primary_rerank_candidate_limit
-            ),
+    if demo_mode and rem_before_rerank < 20.0:
+        print("[1B/9] Remaining time budget tight; using vector similarity ranking for primary evidence...")
+        reranked_results = []
+        for rank, c in enumerate(results[:primary_rerank_top_k], start=1):
+            item = dict(c)
+            item["rerank_rank"] = rank
+            item["reranker_score"] = float(item.get("similarity", 0.85))
+            reranked_results.append(item)
+        counter_evidence_query = f"not {question}" if not question.startswith("not ") else question
+    else:
+        evidence_ranking_pipeline = (
+            get_ranking_pipeline()
         )
-    )
 
-    reranked_results = (
-        ranking_result[
-            "reranked_evidence"
-        ]
-    )
+        ranking_result = (
+            evidence_ranking_pipeline.run(
+                query=question,
 
-    if not reranked_results:
-        raise RuntimeError(
-            "Reranking returned no evidence."
+                candidates=results,
+
+                final_top_k=(
+                    primary_rerank_top_k
+                ),
+
+                candidate_limit=(
+                    primary_rerank_candidate_limit
+                ),
+            )
+        )
+
+        reranked_results = (
+            ranking_result[
+                "reranked_evidence"
+            ]
+        )
+
+        if not reranked_results:
+            raise RuntimeError(
+                "Reranking returned no evidence."
+            )
+
+        counter_evidence_query = (
+            ranking_result[
+                "counter_evidence_query"
+            ]
         )
 
     performance[
@@ -502,12 +563,6 @@ def run_pipeline(
         "primary evidence records."
     )
 
-    counter_evidence_query = (
-        ranking_result[
-            "counter_evidence_query"
-        ]
-    )
-
     # ========================================================
     # 1C. JURISDICTION-AWARE COUNTER EVIDENCE
     # ========================================================
@@ -517,6 +572,7 @@ def run_pipeline(
     print(
         "\n[1C/9] Counter-evidence retrieval..."
     )
+    workflow_stages.append("Counter-Evidence Retrieval")
 
     counter_results = retrieve(
         counter_evidence_query,
@@ -530,27 +586,35 @@ def run_pipeline(
         "counter-evidence candidates."
     )
 
-    counter_ranking_result = (
-        evidence_ranking_pipeline.run(
-            query=counter_evidence_query,
+    if demo_mode:
+        counter_reranked_results = []
+        for rank, c in enumerate(counter_results[:counter_rerank_top_k], start=1):
+            item = dict(c)
+            item["rerank_rank"] = rank
+            item["reranker_score"] = float(item.get("similarity", 0.5))
+            counter_reranked_results.append(item)
+    else:
+        counter_ranking_result = (
+            evidence_ranking_pipeline.run(
+                query=counter_evidence_query,
 
-            candidates=counter_results,
+                candidates=counter_results,
 
-            final_top_k=(
-                counter_rerank_top_k
-            ),
+                final_top_k=(
+                    counter_rerank_top_k
+                ),
 
-            candidate_limit=(
-                counter_rerank_candidate_limit
-            ),
+                candidate_limit=(
+                    counter_rerank_candidate_limit
+                ),
+            )
         )
-    )
 
-    counter_reranked_results = (
-        counter_ranking_result[
-            "reranked_evidence"
-        ]
-    )
+        counter_reranked_results = (
+            counter_ranking_result[
+                "reranked_evidence"
+            ]
+        )
 
     performance[
         "counter_evidence_ms"
@@ -713,12 +777,18 @@ def run_pipeline(
     print(
         "\n[2/9] GPT-OSS evidence classification..."
     )
+    workflow_stages.append("GPT-OSS Classification")
+
+    deadline = t_start + time_budget_seconds
+    rem_stage2 = max(2.0, deadline - time.perf_counter())
+    stage2_timeout = min(10.0, max(2.0, rem_stage2 * 0.35)) if demo_mode else None
 
     evidence_classification = (
         classify_evidence(
             claim=question,
             evidence_records=evidence_records,
             demo_mode=demo_mode,
+            timeout=stage2_timeout,
         )
     )
 
@@ -791,6 +861,7 @@ def run_pipeline(
     print(
         "\n[3/9] Evidence Engine..."
     )
+    workflow_stages.append("Evidence Sufficiency Engine")
 
     claim = build_claim_assessment(
         evidence_classification,
@@ -839,6 +910,7 @@ def run_pipeline(
     print(
         "\n[4/9] Absence Verification..."
     )
+    workflow_stages.append("Absence Verification")
 
     absence = build_absence_verification(
         claim=question,
@@ -883,6 +955,7 @@ def run_pipeline(
     print(
         "\n[5/9] Gap Analysis..."
     )
+    workflow_stages.append("Gap Analysis")
 
     gap_input = build_gap_input(
         evidence_assessment=(
@@ -915,6 +988,7 @@ def run_pipeline(
     print(
         "\n[6/9] Risk Engine..."
     )
+    workflow_stages.append("Risk & Governance Engine")
 
     risk_context = DecisionContext(
         domain=(
@@ -1017,6 +1091,94 @@ def run_pipeline(
     )
 
     # ========================================================
+    # 6B. POLICY <-> STANDARD MAPPING ENGINE
+    # ========================================================
+
+    t_stage = time.perf_counter()
+
+    print(
+        "\n[6B/9] Policy <-> Standard Mapping Engine..."
+    )
+
+    mapping_engine = PolicyStandardMappingEngine(
+        target_jurisdiction=jurisdiction
+    )
+
+    policy_standard_mapping = mapping_engine.map_evidence(
+        evidence_records=final_evidence,
+        question=question,
+    )
+
+    performance[
+        "policy_mapping_ms"
+    ] = round(
+        (
+            time.perf_counter()
+            - t_stage
+        ) * 1000,
+        2,
+    )
+
+    print(
+        f"Mappings: {len(policy_standard_mapping['mappings'])} | "
+        f"Gaps: {len(policy_standard_mapping['gaps'])} | "
+        f"Sufficiency: {policy_standard_mapping['sufficiency']['requirement_mapping']}"
+    )
+
+    # ========================================================
+    # 7. FINAL GPT-OSS SYNTHESIS
+    # ========================================================
+
+    t_stage = time.perf_counter()
+
+    print(
+        "\n[7/9] Final GPT-OSS synthesis..."
+    )
+    workflow_stages.append("GPT-OSS Final Synthesis")
+
+    # ========================================================
+    # 6C. REGIONAL COMPARATIVE GAP ANALYSIS
+    # ========================================================
+
+    regional_analysis = None
+    q_lower = question.lower()
+    auto_regional = any(
+        kw in q_lower
+        for kw in [
+            "regional", "neighbouring", "neighboring", "comparative",
+            "bangladesh", "sri lanka", "pakistan", "nepal", "bhutan",
+            "cross-jurisdiction", "neighbour", "neighbor"
+        ]
+    )
+    effective_regional_mode = regional_mode
+    if effective_regional_mode == "OFF" and auto_regional:
+        effective_regional_mode = "COMPARATIVE"
+
+    if effective_regional_mode != "OFF":
+        t_stage = time.perf_counter()
+        print("\n[6C/9] Regional Comparative Gap Analysis Engine...")
+        domain_name = classification.get("domain") or "telecom"
+        regional_engine = RegionalComparativeGapEngine(
+            host_jurisdiction=jurisdiction,
+            regional_mode=effective_regional_mode,
+        )
+        regional_result_obj = regional_engine.compare(
+            evidence_records=final_evidence,
+            question=question,
+            domain=domain_name,
+        )
+        regional_analysis = regional_result_obj.to_dict()
+        performance["regional_gap_ms"] = round(
+            (time.perf_counter() - t_stage) * 1000, 2
+        )
+        print(
+            f"Regional Mode: {effective_regional_mode} | "
+            f"Gap Status: {regional_analysis['gap_status']} | "
+            f"Action: {regional_analysis['action']} | "
+            f"Human Review: {regional_analysis['human_review_required']}"
+        )
+
+    # ========================================================
     # 7. FINAL GPT-OSS SYNTHESIS
     # ========================================================
 
@@ -1026,8 +1188,11 @@ def run_pipeline(
         "\n[7/9] Final GPT-OSS synthesis..."
     )
 
-    final = (
-        synthesize_final_assessment(
+    rem_stage7 = deadline - time.perf_counter()
+    if demo_mode and rem_stage7 < 6.0:
+        print("[7/9] Live demo budget deadline approaching (<6s); generating evidence-grounded fallback synthesis.")
+        from Backend.final_synthesis import _generate_fallback_synthesis
+        final = _generate_fallback_synthesis(
             question=question,
             evidence_records=evidence_records,
             classification=evidence_classification,
@@ -1037,10 +1202,45 @@ def run_pipeline(
             ],
             gap_input=gap_input,
             risk_assessment=risk_dict,
-            demo_mode=demo_mode,
             counter_evidence_analysis=ranking_evidence_analysis,
+            policy_standard_mapping=policy_standard_mapping,
+            regional_comparative_analysis=regional_analysis,
         )
+    else:
+        stage7_timeout = min(15.0, max(3.0, rem_stage7 - 2.0)) if demo_mode else None
+        final = (
+            synthesize_final_assessment(
+                question=question,
+                evidence_records=evidence_records,
+                classification=evidence_classification,
+                evidence_assessment=evidence_dict,
+                absence_verifications=[
+                    absence_dict
+                ],
+                gap_input=gap_input,
+                risk_assessment=risk_dict,
+                demo_mode=demo_mode,
+                counter_evidence_analysis=ranking_evidence_analysis,
+                policy_standard_mapping=policy_standard_mapping,
+                regional_comparative_analysis=regional_analysis,
+                timeout=stage7_timeout,
+            )
+        )
+
+    # ========================================================
+    # 7B. PRE-OUTPUT CLAIM VALIDATION GATE
+    # ========================================================
+
+    final = validate_synthesis_claims(
+        synthesis_result=final,
+        evidence_records=evidence_records,
     )
+
+    if regional_analysis:
+        final = validate_regional_claims(
+            synthesis_result=final,
+            regional_analysis=regional_analysis,
+        )
 
     performance[
         "synthesis_ms"
@@ -1072,6 +1272,7 @@ def run_pipeline(
     print(
         "\n[8/9] Building claim -> evidence mappings..."
     )
+    workflow_stages.append("Claim-Evidence Mapping")
 
     mappings = []
 
@@ -1115,11 +1316,34 @@ def run_pipeline(
     print(
         "\n[9/9] Writing audit trail..."
     )
+    workflow_stages.append("Audit Trail Ledger")
 
     audit_record = create_audit_record(
         question=question,
 
         model="openai/gpt-oss-120b",
+
+        execution_id=exec_id,
+
+        event_type=event_type,
+
+        execution_status="COMPLETED",
+
+        scenario_id=scenario_id,
+
+        scenario_title=scenario_title,
+
+        step_id=step_id,
+
+        step_title=step_title,
+
+        workflow_stages=workflow_stages,
+
+        provenance="RUNTIME_EXECUTION",
+
+        domain=classification.get("domain") if "classification" in locals() and isinstance(classification, dict) else None,
+
+        jurisdiction=jurisdiction,
 
         retrieved_evidence=evidence_records,
 
@@ -1156,6 +1380,16 @@ def run_pipeline(
         ),
         notes=notes or [],
     )
+
+    if regional_analysis:
+        audit_record["regional_comparative_analysis"] = {
+            "host_jurisdiction": regional_analysis.get("host_jurisdiction"),
+            "regional_jurisdictions": regional_analysis.get("regional_jurisdictions"),
+            "regional_evidence_ids": regional_analysis.get("evidence_ids"),
+            "gap_status": regional_analysis.get("gap_status"),
+            "human_review_required": regional_analysis.get("human_review_required"),
+            "coverage_status": regional_analysis.get("coverage_status"),
+        }
 
     audit_id = append_audit_record(
         audit_record
@@ -1254,7 +1488,7 @@ def run_pipeline(
         ),
 
         # Final evidence passed downstream
-        "retrieval": (
+        "retrieval": RetrievalList(
             evidence_records[:4]
             if demo_mode
             else evidence_records
@@ -1287,9 +1521,21 @@ def run_pipeline(
 
         "governance": governance,
 
+        # Policy <-> Standard Mapping Engine Results
+        "policy_standard_mappings": policy_standard_mapping.get("mappings", []),
+        "extracted_requirements": policy_standard_mapping.get("extracted_requirements", []),
+        "genuine_gaps": policy_standard_mapping.get("gaps", []),
+        "decision_sufficiency": policy_standard_mapping.get("sufficiency", {}),
+
+        # Regional Comparative Gap Analysis
+        "regional_comparative_analysis": regional_analysis,
+
         "notes": notes or [],
 
         "audit_id": audit_id,
+        "execution_id": exec_id,
+        "event_type": event_type,
+        "workflow_stages": workflow_stages,
     }
 
 

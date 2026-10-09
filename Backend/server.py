@@ -1,3 +1,7 @@
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+import uuid
 from typing import Optional
 from pathlib import Path
 
@@ -28,6 +32,8 @@ from pydantic import BaseModel
 from .risk_engine_api import router as risk_router
 from .audit_api import router as audit_router
 from .audit.recorder import (
+    create_audit_record,
+    append_audit_record,
     load_audit_records,
     get_latest_review_event,
 )
@@ -55,6 +61,19 @@ app = FastAPI(
         "HackGrid Evidence Intelligence Backend"
     ),
 )
+
+@app.on_event("startup")
+def warmup_services():
+    try:
+        from rag.multi_kb_retriever import get_unified_retriever
+        from Backend.orchestrator import get_ranking_pipeline
+        print("[STARTUP] Pre-warming HackGrid Multi-KB Retriever...")
+        get_unified_retriever()
+        print("[STARTUP] Pre-warming Evidence Ranking Pipeline...")
+        get_ranking_pipeline()
+        print("[STARTUP] HackGrid models pre-warmed successfully. Ready for live queries.")
+    except Exception as exc:
+        print(f"[STARTUP] Warning during pre-warming: {exc}")
 
 
 # ============================================================
@@ -126,6 +145,8 @@ class QueryRequest(BaseModel):
     # Default remains DEMO because the frontend is
     # primarily interactive.
     demo_mode: Optional[bool] = True
+
+    regional_mode: Optional[str] = "OFF" 
 
 
 class ScenarioRunRequest(BaseModel):
@@ -321,80 +342,96 @@ def jurisdictions():
 def query(
     request: QueryRequest,
 ):
-
-    # --------------------------------------------------------
-    # Validate jurisdiction
-    # --------------------------------------------------------
-
-    validate_jurisdiction(
-        request.jurisdiction
-    )
-
-    # --------------------------------------------------------
-    # Resolve question/query
-    # --------------------------------------------------------
-
+    exec_id = f"RUN-{uuid.uuid4().hex[:12]}"
     q = (
         request.question
         or request.query
         or ""
     ).strip()
 
-    if not q or len(q) < 3:
-
-        raise HTTPException(
-            status_code=422,
-
-            detail=(
-                "Field 'question' or 'query' "
-                "must be provided with at least "
-                "3 characters."
-            ),
+    try:
+        # Validate jurisdiction
+        validate_jurisdiction(
+            request.jurisdiction
         )
 
-    # --------------------------------------------------------
-    # Resolve execution mode
-    # --------------------------------------------------------
+        if not q or len(q) < 3:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Field 'question' or 'query' "
+                    "must be provided with at least "
+                    "3 characters."
+                ),
+            )
 
-    demo = (
-        True
-        if request.demo_mode is None
-        else request.demo_mode
-    )
+        demo = getattr(request, "demo_mode", True)
+        if demo is None:
+            demo = True
 
-    # --------------------------------------------------------
-    # Execute HackGrid pipeline
-    # --------------------------------------------------------
-
-    try:
-        import importlib
-        import Backend.governance
-        import Backend.orchestrator
-        importlib.reload(Backend.governance)
-        importlib.reload(Backend.orchestrator)
-
-        result = Backend.orchestrator.run_pipeline(
+        reg_mode = getattr(request, "regional_mode", "OFF") or "OFF"
+        result = run_pipeline(
             q,
             jurisdiction=(
                 request.jurisdiction
             ),
             demo_mode=demo,
+            regional_mode=reg_mode,
+            execution_id=exec_id,
+            event_type="QUESTION_ANALYSIS",
+            time_budget_seconds=38.0,
         )
 
         return result
 
-    except ValueError as exc:
+    except HTTPException as exc:
+        failure_rec = create_audit_record(
+            question=q or "Invalid query",
+            execution_id=exec_id,
+            event_type="QUESTION_ANALYSIS",
+            execution_status="FAILED",
+            error_details=str(exc.detail),
+            workflow_stages=["Input Validation"],
+            final_decision="VALIDATION_FAILED",
+            notes=[f"Validation error: {exc.detail}"],
+            jurisdiction=getattr(request, "jurisdiction", "India"),
+        )
+        append_audit_record(failure_rec)
+        raise
 
+    except ValueError as exc:
+        failure_rec = create_audit_record(
+            question=q or "Invalid query",
+            execution_id=exec_id,
+            event_type="QUESTION_ANALYSIS",
+            execution_status="FAILED",
+            error_details=str(exc),
+            workflow_stages=["Validation"],
+            final_decision="VALIDATION_FAILED",
+            notes=[f"Validation error: {exc}"],
+            jurisdiction=getattr(request, "jurisdiction", "India"),
+        )
+        append_audit_record(failure_rec)
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         )
 
     except Exception as exc:
-
+        failure_rec = create_audit_record(
+            question=q or "Pipeline execution error",
+            execution_id=exec_id,
+            event_type="QUESTION_ANALYSIS",
+            execution_status="FAILED",
+            error_details=str(exc),
+            workflow_stages=["Pipeline Execution"],
+            final_decision="EXECUTION_FAILED",
+            notes=[f"Pipeline failure: {exc}"],
+            jurisdiction=getattr(request, "jurisdiction", "India"),
+        )
+        append_audit_record(failure_rec)
         raise HTTPException(
             status_code=500,
-
             detail=(
                 "Pipeline execution failed: "
                 f"{exc}"
@@ -573,12 +610,25 @@ def run_scenario(
                 break
 
         if prev_audit is None:
+            reason_msg = f"Previous scenario step '{prev_step_id}' must be executed before proceeding."
+            blocked_rec = create_audit_record(
+                question=question,
+                execution_id=f"RUN-{uuid.uuid4().hex[:12]}",
+                event_type="SCENARIO_EXECUTION",
+                execution_status="BLOCKED",
+                error_details=reason_msg,
+                scenario_id=request.scenario_id,
+                scenario_title=scenario.get("title"),
+                step_id=selected_step.get("step_id"),
+                step_title=selected_step.get("title"),
+                workflow_stages=["Scenario Step Gating"],
+                final_decision="EXECUTE_PREVIOUS_STEP",
+                jurisdiction=request.jurisdiction,
+            )
+            append_audit_record(blocked_rec)
             return {
                 "blocked": True,
-                "reason": (
-                    f"Previous scenario step '{prev_step_id}' must be "
-                    "executed before proceeding."
-                ),
+                "reason": reason_msg,
                 "required_action": "EXECUTE_PREVIOUS_STEP",
                 "previous_step_id": prev_step_id,
                 "previous_audit_id": None,
@@ -598,12 +648,25 @@ def run_scenario(
             )
 
             if prev_status == "PENDING":
+                reason_msg = "Previous scenario step is still pending human review."
+                blocked_rec = create_audit_record(
+                    question=question,
+                    execution_id=f"RUN-{uuid.uuid4().hex[:12]}",
+                    event_type="SCENARIO_EXECUTION",
+                    execution_status="BLOCKED",
+                    error_details=reason_msg,
+                    scenario_id=request.scenario_id,
+                    scenario_title=scenario.get("title"),
+                    step_id=selected_step.get("step_id"),
+                    step_title=selected_step.get("title"),
+                    workflow_stages=["Scenario Step Gating"],
+                    final_decision="HUMAN_REVIEW",
+                    jurisdiction=request.jurisdiction,
+                )
+                append_audit_record(blocked_rec)
                 return {
                     "blocked": True,
-                    "reason": (
-                        "Previous scenario step is still pending "
-                        "human review."
-                    ),
+                    "reason": reason_msg,
                     "required_action": "HUMAN_REVIEW",
                     "previous_step_id": prev_step_id,
                     "previous_audit_id": prev_audit_id,
@@ -663,6 +726,7 @@ def run_scenario(
     # unnecessary CPU time on large reranking sets.
     # --------------------------------------------------------
 
+    exec_id = f"RUN-{uuid.uuid4().hex[:12]}"
     try:
 
         pipeline_result = run_pipeline(
@@ -676,6 +740,20 @@ def run_scenario(
             demo_mode=True,
 
             notes=prior_notes,
+
+            execution_id=exec_id,
+
+            event_type="SCENARIO_EXECUTION",
+
+            scenario_id=request.scenario_id,
+
+            scenario_title=scenario.get("title"),
+
+            step_id=selected_step.get("step_id"),
+
+            step_title=selected_step.get("title"),
+
+            time_budget_seconds=38.0,
         )
 
         # ----------------------------------------------------
@@ -735,17 +813,44 @@ def run_scenario(
         }
 
     except ValueError as exc:
-
+        failure_rec = create_audit_record(
+            question=question,
+            execution_id=exec_id,
+            event_type="SCENARIO_EXECUTION",
+            execution_status="FAILED",
+            error_details=str(exc),
+            scenario_id=request.scenario_id,
+            scenario_title=scenario.get("title"),
+            step_id=selected_step.get("step_id"),
+            step_title=selected_step.get("title"),
+            workflow_stages=["Scenario Execution"],
+            final_decision="VALIDATION_FAILED",
+            jurisdiction=request.jurisdiction,
+        )
+        append_audit_record(failure_rec)
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         )
 
     except Exception as exc:
-
+        failure_rec = create_audit_record(
+            question=question,
+            execution_id=exec_id,
+            event_type="SCENARIO_EXECUTION",
+            execution_status="FAILED",
+            error_details=str(exc),
+            scenario_id=request.scenario_id,
+            scenario_title=scenario.get("title"),
+            step_id=selected_step.get("step_id"),
+            step_title=selected_step.get("title"),
+            workflow_stages=["Scenario Execution"],
+            final_decision="EXECUTION_FAILED",
+            jurisdiction=request.jurisdiction,
+        )
+        append_audit_record(failure_rec)
         raise HTTPException(
             status_code=500,
-
             detail=(
                 "Scenario execution failed: "
                 f"{exc}"

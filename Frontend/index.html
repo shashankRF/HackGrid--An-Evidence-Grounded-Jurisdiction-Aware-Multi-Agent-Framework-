@@ -1311,6 +1311,100 @@
       color: #fca5a5;
     }
 
+
+    /* ============================================================
+       REGIONAL COMPARATIVE GAP ANALYSIS STYLES
+       ============================================================ */
+    .rcg-card {
+      margin-top: 14px;
+      border: 1px solid rgba(139, 92, 246, 0.25);
+      border-radius: 9px;
+      background: rgba(139, 92, 246, 0.025);
+      padding: 16px 20px;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+    .rcg-card:hover {
+      border-color: rgba(139, 92, 246, 0.4);
+      background: rgba(139, 92, 246, 0.04);
+    }
+    .rcg-top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .rcg-badge-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .rcg-badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .rcg-badge-host {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+    .rcg-badge-intl {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+    .rcg-badge-regional {
+      background: rgba(168, 85, 247, 0.15);
+      color: #d8b4fe;
+      border: 1px solid rgba(168, 85, 247, 0.35);
+    }
+    .rcg-rule-notice {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+      font-size: 12px;
+      color: #fbbf24;
+      line-height: 1.5;
+    }
+    .rcg-grid-triad {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .rcg-cell {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 6px;
+      padding: 12px;
+    }
+    .rcg-cell-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .rcg-cell-content {
+      font-size: 12.5px;
+      color: var(--fg);
+      line-height: 1.5;
+    }
+
     .gap-card {
       margin-top: 12px;
       border: 1px solid rgba(255, 255, 255, 0.09);
@@ -3280,6 +3374,9 @@
         </select>
         <button type="button" class="btn" id="audit-btn-reset" style="padding:8px 16px;font-size:13px;">Clear
           Filters</button>
+        <button type="button" class="btn" id="audit-btn-export-excel" style="padding:8px 16px;font-size:13px;display:inline-flex;align-items:center;gap:6px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);color:#4ade80;cursor:pointer;font-weight:500;">
+          Export Audit Trail to Excel
+        </button>
       </div>
 
       <!-- Audit List View -->
@@ -3674,9 +3771,9 @@
         var timeoutMs = options.timeout !== undefined
           ? options.timeout
           : endpoint.indexOf('/run') !== -1
-            ? 90000
+            ? 42000
             : endpoint.indexOf('/query') !== -1
-              ? 180000
+              ? 42000
               : 10000;
         var controller = new AbortController();
         var timer;
@@ -3690,7 +3787,7 @@
           res = await fetch(url, options);
         } catch (err) {
           if (err.name === 'AbortError' || (controller && controller.signal.aborted)) {
-            var abortErr = new Error('Request timed out after ' + (timeoutMs / 1000) + 's. Deep multi-stage compliance analysis in progress.');
+            var abortErr = new Error('Request reached 40s live demo deadline. Verified evidence retrieved.');
             abortErr.name = 'AbortError';
             throw abortErr;
           }
@@ -3850,17 +3947,51 @@
         html += '<summary>View Agent Analysis &amp; Risk Governance</summary>';
         html += '<div style="margin-top:16px;">';
 
+        var formatTechImpl = function (ti) {
+          if (typeof ti === 'string') return escapeHtml(ti);
+          if (!ti || typeof ti !== 'object') return '';
+          var impl = ti.implication || '';
+          var status = ti.status || '';
+          var basis = ti.basis || '';
+          var lim = ti.limitation || '';
+          var evIds = (ti.evidence_ids || []).join(', ');
+          var out = '<strong>' + escapeHtml(impl) + '</strong>';
+          if (status) out += ' <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--strip);margin-left:6px;">Status: ' + escapeHtml(status) + '</span>';
+          if (basis) out += '<div style="font-size:12px;color:var(--muted);margin-top:2px;"><i>Basis:</i> ' + escapeHtml(basis) + '</div>';
+          if (lim) out += '<div style="font-size:11px;color:var(--muted);margin-top:2px;"><i>Limitation:</i> ' + escapeHtml(lim) + '</div>';
+          if (evIds) out += '<div style="font-size:11px;color:var(--strip);margin-top:2px;">Evidence: <code>' + escapeHtml(evIds) + '</code></div>';
+          return out;
+        };
+
+        var formatRegImpl = function (ri) {
+          if (typeof ri === 'string') return escapeHtml(ri);
+          if (!ri || typeof ri !== 'object') return '';
+          var stmt = ri.statement || ri.implication || '';
+          var status = ri.mandatory_status || ri.status || '';
+          var basis = ri.basis || '';
+          var concl = ri.conclusion || '';
+          var lim = ri.limitation || '';
+          var evIds = (ri.authority_evidence_ids || ri.evidence_ids || []).join(', ');
+          var out = '<strong>' + escapeHtml(stmt) + '</strong>';
+          if (status) out += ' <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.06);color:var(--strip);margin-left:6px;">Status: ' + escapeHtml(status) + '</span>';
+          if (concl && concl !== stmt) out += '<div style="font-size:12px;color:var(--muted);margin-top:3px;">' + escapeHtml(concl) + '</div>';
+          if (basis) out += '<div style="font-size:12px;color:var(--muted);margin-top:2px;"><i>Basis:</i> ' + escapeHtml(basis) + '</div>';
+          if (lim) out += '<div style="font-size:11px;color:#f59e0b;margin-top:2px;"><i>Limitation:</i> ' + escapeHtml(lim) + '</div>';
+          if (evIds) out += '<div style="font-size:11px;color:var(--strip);margin-top:2px;">Evidence: <code>' + escapeHtml(evIds) + '</code></div>';
+          return out;
+        };
+
         if (synth.technical_implications && synth.technical_implications.length > 0) {
           html += '<h4 style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--strip);margin-top:10px;">Technical Implications</h4>';
           html += '<ul style="margin:8px 0 16px 20px;color:var(--muted);line-height:1.6;">';
-          synth.technical_implications.forEach(function (ti) { html += '<li>' + escapeHtml(ti) + '</li>'; });
+          synth.technical_implications.forEach(function (ti) { html += '<li style="margin-bottom:8px;">' + formatTechImpl(ti) + '</li>'; });
           html += '</ul>';
         }
 
         if (synth.regulatory_implications && synth.regulatory_implications.length > 0) {
           html += '<h4 style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--strip);margin-top:10px;">Regulatory Implications</h4>';
           html += '<ul style="margin:8px 0 16px 20px;color:var(--muted);line-height:1.6;">';
-          synth.regulatory_implications.forEach(function (ri) { html += '<li>' + escapeHtml(ri) + '</li>'; });
+          synth.regulatory_implications.forEach(function (ri) { html += '<li style="margin-bottom:8px;">' + formatRegImpl(ri) + '</li>'; });
           html += '</ul>';
         }
 
@@ -3972,6 +4103,94 @@
 
         html += '</div>';
         html += '</details>';
+
+        // ============================================================
+        // SECTION 3B: REGIONAL COMPARATIVE GAP ANALYSIS
+        // ============================================================
+        var rcg = data.regional_comparative_analysis || (synth && synth.regional_comparative_analysis);
+        if (rcg) {
+          var rcgHost = escapeHtml(rcg.host_jurisdiction || 'India');
+          var rcgJuris = (rcg.regional_jurisdictions || []).join(', ') || 'None';
+          var rcgGapStatus = escapeHtml(rcg.gap_status || 'NO ESTABLISHED GAP');
+          var rcgAction = escapeHtml(rcg.action || 'NO ACTION');
+          var rcgCoverage = escapeHtml(rcg.coverage_status || 'Not Established');
+          var rcgWhy = escapeHtml(rcg.reasoning || '');
+          var rcgImpact = escapeHtml(rcg.impact || '');
+          var rcgRemediation = escapeHtml(rcg.remediation || '');
+          var rcgCounter = escapeHtml(rcg.counter_evidence_summary || 'None');
+          var rcgLimitation = escapeHtml(rcg.limitations || 'None');
+
+          var rcgStatusClass = 'no-gap';
+          if (rcgGapStatus.indexOf('ESTABLISHED GAP') !== -1 && rcgGapStatus.indexOf('NO') === -1 && rcgGapStatus.indexOf('POTENTIAL') === -1) rcgStatusClass = 'established-gap';
+          else if (rcgGapStatus.indexOf('PARTIALLY') !== -1) rcgStatusClass = 'partially-covered';
+          else if (rcgGapStatus.indexOf('POTENTIAL') !== -1) rcgStatusClass = 'potential-gap';
+          else if (rcgGapStatus.indexOf('ABSENCE') !== -1) rcgStatusClass = 'absence-not-established';
+
+          var rcgActionClass = 'no-action';
+          if (rcgAction.indexOf('FIX') !== -1) rcgActionClass = 'fix';
+          else if (rcgAction.indexOf('VERIFY') !== -1) rcgActionClass = 'verify';
+          else if (rcgAction.indexOf('INVESTIGATE') !== -1) rcgActionClass = 'investigate';
+
+          var intlReqs = rcg.international_requirements || [];
+          var hostReqs = rcg.host_requirements || [];
+          var regReqs = rcg.regional_requirements || [];
+
+          var intlTxt = intlReqs.length ? (intlReqs[0].requirement_summary || intlReqs[0].requirement_text || '') : 'International technical security standard requirement';
+          var hostTxt = hostReqs.length ? (hostReqs[0].requirement_text || hostReqs[0].document || '') : 'An applicable host-country provision was not established in the evidence examined.';
+          var regTxt = regReqs.length ? (regReqs[0].requirement_text || regReqs[0].document || '') : 'Sufficient comparative evidence was not available in current knowledge base.';
+
+          html += '<details open style="margin-top:16px;">';
+          html += '  <summary style="cursor:pointer;font-weight:600;font-size:13px;letter-spacing:0.04em;text-transform:uppercase;color:#c084fc;">🌐 Regional Comparative Analysis</summary>';
+          html += '  <div class="rcg-card">';
+          html += '    <div class="rcg-top-bar">';
+          html += '      <div class="rcg-badge-group">';
+          html += '        <span class="rcg-badge rcg-badge-host">Host: ' + rcgHost + '</span>';
+          html += '        <span class="rcg-badge rcg-badge-regional">Regional: ' + escapeHtml(rcgJuris) + '</span>';
+          html += '        <span class="gap-status-badge status-' + rcgStatusClass + '">' + rcgGapStatus + '</span>';
+          html += '        <span class="gap-action-badge action-' + rcgActionClass + '">ACTION: ' + rcgAction + '</span>';
+          html += '      </div>';
+          html += '    </div>';
+
+          html += '    <div class="rcg-rule-notice">';
+          html += '      <strong>Strict Applicability Rule:</strong> Regional comparative evidence is informational only. Direct legal or regulatory applicability to ' + rcgHost + ' is NOT established by foreign/regional evidence.';
+          html += '    </div>';
+
+          html += '    <div class="rcg-grid-triad">';
+          html += '      <div class="rcg-cell">';
+          html += '        <div class="rcg-cell-title"><span>International Requirement</span><span class="rcg-badge rcg-badge-intl">INTERNATIONAL STANDARD</span></div>';
+          html += '        <div class="rcg-cell-content">' + escapeHtml(intlTxt.substring(0, 220)) + (intlTxt.length > 220 ? '...' : '') + '</div>';
+          html += '      </div>';
+          html += '      <div class="rcg-cell">';
+          html += '        <div class="rcg-cell-title"><span>Host Coverage (' + rcgHost + ')</span><span class="rcg-badge rcg-badge-host">' + rcgCoverage + '</span></div>';
+          html += '        <div class="rcg-cell-content">' + escapeHtml(hostTxt.substring(0, 220)) + (hostTxt.length > 220 ? '...' : '') + '</div>';
+          html += '      </div>';
+          html += '      <div class="rcg-cell">';
+          html += '        <div class="rcg-cell-title"><span>Regional Evidence</span><span class="rcg-badge rcg-badge-regional">REGIONAL COMPARATIVE</span></div>';
+          html += '        <div class="rcg-cell-content">' + escapeHtml(regTxt.substring(0, 220)) + (regTxt.length > 220 ? '...' : '') + '</div>';
+          html += '      </div>';
+          html += '    </div>';
+
+          html += '    <details class="gap-expandable" open>';
+          html += '      <summary>View Comparative Reasoning, Impact &amp; Technical Remediation</summary>';
+          html += '      <div class="gap-grid">';
+          html += '        <div class="gap-row"><span class="lbl">Why (Evidence Reasoning)</span><span class="val">' + rcgWhy + '</span></div>';
+          if (rcgImpact) {
+            html += '        <div class="gap-row"><span class="lbl">Operational Impact</span><span class="val">' + rcgImpact + '</span></div>';
+          }
+          if (rcgRemediation) {
+            html += '        <div class="gap-row"><span class="lbl">Technical Remediation (' + rcgAction + ')</span><span class="val">' + rcgRemediation + '</span></div>';
+          }
+          if (rcgCounter && rcgCounter !== 'None') {
+            html += '        <div class="gap-row"><span class="lbl">Counter-Evidence</span><span class="val">' + rcgCounter + '</span></div>';
+          }
+          if (rcgLimitation) {
+            html += '        <div class="gap-row"><span class="lbl">Limitations</span><span class="val">' + rcgLimitation + '</span></div>';
+          }
+          html += '      </div>';
+          html += '    </details>';
+          html += '  </div>';
+          html += '</details>';
+        }
 
         // ============================================================
         // SECTION 4: RIGOROUS DECISION-GOVERNANCE LAYER (8 LAYERS)
@@ -4903,35 +5122,68 @@
           var audits = data.audits || [];
           if (countLabel) countLabel.textContent = 'Showing ' + audits.length + ' of ' + (data.total || 0) + ' immutable audit records';
 
+          if ((data.total || 0) === 0) {
+            listEl.innerHTML = '<div style="padding:48px 24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;margin:20px 0;"><p style="font-size:16px;color:var(--ink);margin-bottom:8px;font-weight:500;">No audit events recorded yet.</p><p style="font-size:13px;color:var(--strip);">Run a question or scenario to create your first audit record.</p></div>';
+            return;
+          }
           if (audits.length === 0) {
-            listEl.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px;"><p style="font-size:16px;color:var(--ink);margin-bottom:6px;">No audit records found matching active filters.</p><p style="font-size:13px;color:var(--strip);">Try clearing filters or searching another keyword.</p></div>';
+            listEl.innerHTML = '<div style="padding:48px 24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;margin:20px 0;"><p style="font-size:16px;color:var(--ink);margin-bottom:8px;font-weight:500;">No audit records found matching active filters.</p><p style="font-size:13px;color:var(--strip);">Try clearing filters or searching another keyword.</p></div>';
             return;
           }
 
           listEl.innerHTML = audits.map(function (a) {
-            var dateStr = a.timestamp ? new Date(a.timestamp).toLocaleString() : 'Timestamp Recorded';
+            var dateStr = a.timestamp ? new Date(a.timestamp).toLocaleString() : 'Not recorded';
             var rClass = 'risk-' + (a.risk_level || 'MODERATE');
-            var typeTag = a.audit_type === 'SIMULATED SCENARIO' ? 'Simulated Scenario' : 'Question Analysis';
-            var titleText = a.scenario ? ('[' + a.scenario.step_id + '] ' + a.scenario.step_title) : a.question;
+            var typeTag = a.event_type || a.audit_type || 'QUESTION_ANALYSIS';
+            if (typeTag === 'QUESTION_ANALYSIS' || typeTag === 'QUESTION / ANALYSIS') typeTag = 'Question Analysis';
+            else if (typeTag === 'SCENARIO_EXECUTION' || typeTag === 'SIMULATED SCENARIO') typeTag = 'Scenario Execution';
+            else if (typeTag === 'GOVERNANCE_DECISION') typeTag = 'Governance Decision';
 
-            return '<div class="audit-card" data-audit-id="' + escapeHtml(a.audit_id) + '">' +
+            var titleText = a.scenario ? ('[' + (a.scenario.step_id || 'STEP') + '] ' + (a.scenario.step_title || a.scenario.scenario_title || 'Scenario Step')) : (a.question || 'Execution Record');
+
+            var statusBadge = '';
+            var execStatus = String(a.execution_status || 'COMPLETED').toUpperCase();
+            if (execStatus === 'FAILED') {
+              statusBadge = '<span class="badge-tag" style="color:#f87171;border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.06);">FAILED</span>';
+            } else if (execStatus === 'BLOCKED') {
+              statusBadge = '<span class="badge-tag" style="color:#fbbf24;border-color:rgba(251,191,36,0.4);background:rgba(251,191,36,0.06);">BLOCKED</span>';
+            } else {
+              statusBadge = '<span class="badge-tag" style="color:#4ade80;border-color:rgba(74,222,128,0.3);">COMPLETED</span>';
+            }
+
+            var provBadge = '';
+            if (a.provenance === 'LEGACY_UNVERIFIED') {
+              provBadge = '<span class="badge-tag" style="color:var(--strip);border-color:rgba(148,163,184,0.25);" title="Historical record with unverified provenance">Unverified Legacy Record</span>';
+            } else {
+              provBadge = '<span class="badge-tag" style="color:#38bdf8;border-color:rgba(56,189,248,0.3);">Runtime Execution</span>';
+            }
+
+            var execIdBadge = (a.execution_id && a.execution_id !== 'Not recorded') ?
+              '<span class="badge-tag" style="font-family:ui-monospace,monospace;color:#a5b4fc;border-color:rgba(165,180,252,0.3);" title="Execution Run ID">' + escapeHtml(a.execution_id) + '</span>' : '';
+
+            var excerptText = a.assessment_excerpt ? escapeHtml(a.assessment_excerpt) : 'Not recorded';
+
+            return '<div class="audit-card" data-audit-id="' + escapeHtml(a.audit_id || '') + '">' +
               '<div class="audit-card-top">' +
               '  <div class="audit-card-meta">' +
-              '    <span class="audit-id-badge">' + escapeHtml(a.audit_id) + ' <button type="button" class="audit-copy-btn" title="Copy ID" onclick="event.stopPropagation();copyAuditId(\'' + escapeHtml(a.audit_id) + '\', this);">&#x2398;</button></span>' +
+              '    <span class="audit-id-badge">' + escapeHtml(a.audit_id || 'Not recorded') + ' <button type="button" class="audit-copy-btn" title="Copy ID" onclick="event.stopPropagation();copyAuditId(\'' + escapeHtml(a.audit_id || '') + '\', this);">&#x2398;</button></span>' +
+              '    ' + execIdBadge +
+              '    ' + statusBadge +
               '    <span class="badge-tag">' + escapeHtml(typeTag) + '</span>' +
-              '    <span class="badge-tag">' + escapeHtml(a.domain) + '</span>' +
-              '    <span class="badge-tag">' + escapeHtml(a.jurisdiction) + '</span>' +
+              '    <span class="badge-tag">' + escapeHtml(a.domain || 'Not recorded') + '</span>' +
+              '    <span class="badge-tag">' + escapeHtml(a.jurisdiction || 'Not recorded') + '</span>' +
+              '    ' + provBadge +
               '  </div>' +
               '  <span style="font-size:12px;color:var(--strip);">' + escapeHtml(dateStr) + '</span>' +
               '</div>' +
               '<h3>' + escapeHtml(titleText) + '</h3>' +
-              '<p>' + escapeHtml(a.assessment_excerpt) + '...</p>' +
+              '<p>' + excerptText + '...</p>' +
               '<div class="audit-card-foot">' +
               '  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-              '    <span class="risk-pill ' + rClass + '">' + escapeHtml(a.risk_level) + ' RISK (' + a.risk_score + ')</span>' +
-              '    <span class="badge-tag">Status: ' + escapeHtml(a.evidence_status) + '</span>' +
+              '    <span class="risk-pill ' + rClass + '">' + escapeHtml(a.risk_level || 'Not recorded') + ' RISK (' + (a.risk_score !== undefined ? a.risk_score : 'Not recorded') + ')</span>' +
+              '    <span class="badge-tag">Status: ' + escapeHtml(a.evidence_status || 'Not recorded') + '</span>' +
               '    ' + (a.human_review_required ? '<span class="badge-tag" style="border-color:rgba(239,68,68,0.3);color:#f87171;">Review Required</span>' : '') +
-              '    <span style="font-size:12px;color:var(--strip);">' + a.evidence_count + ' Passages · ' + a.claims_count + ' Claims</span>' +
+              '    <span style="font-size:12px;color:var(--strip);">' + (a.evidence_count !== undefined ? a.evidence_count : 0) + ' Passages &middot; ' + (a.claims_count !== undefined ? a.claims_count : 0) + ' Claims</span>' +
               '  </div>' +
               '  <span style="color:#fff;font-size:13px;font-weight:500;">Inspect Record &rarr;</span>' +
               '</div>' +
@@ -4983,19 +5235,40 @@
           var html = '';
 
           // Header Console Banner
+          var execId = rec.execution_id || 'Not recorded';
+          var execStatus = String(rec.execution_status || 'COMPLETED').toUpperCase();
+          var eventType = rec.event_type || rec.audit_type || (isSim ? 'SCENARIO_EXECUTION' : 'QUESTION_ANALYSIS');
+
           html += '<div style="border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px;">';
           html += '  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px;">';
           html += '    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
-          html += '      <span class="audit-id-badge" style="font-size:14px;padding:5px 12px;">' + escapeHtml(rec.audit_id) + ' <button type="button" class="audit-copy-btn" onclick="copyAuditId(\'' + escapeHtml(rec.audit_id) + '\', this)">&#x2398; Copy</button></span>';
-          html += '      <span class="risk-pill risk-' + escapeHtml(risk.risk_level || 'MODERATE') + '">' + escapeHtml(risk.risk_level || 'MODERATE') + ' RISK (' + (risk.risk_score || 50) + ')</span>';
+          html += '      <span class="audit-id-badge" style="font-size:14px;padding:5px 12px;">' + escapeHtml(rec.audit_id || 'Not recorded') + ' <button type="button" class="audit-copy-btn" onclick="copyAuditId(\'' + escapeHtml(rec.audit_id || '') + '\', this)">&#x2398; Copy</button></span>';
+          html += '      <span class="badge-tag" style="font-family:ui-monospace,monospace;color:#a5b4fc;border-color:rgba(165,180,252,0.3);">Run ID: ' + escapeHtml(execId) + '</span>';
+          if (execStatus === 'FAILED') {
+            html += '      <span class="badge-tag" style="color:#f87171;border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.06);">FAILED</span>';
+          } else if (execStatus === 'BLOCKED') {
+            html += '      <span class="badge-tag" style="color:#fbbf24;border-color:rgba(251,191,36,0.4);background:rgba(251,191,36,0.06);">BLOCKED</span>';
+          } else {
+            html += '      <span class="badge-tag" style="color:#4ade80;border-color:rgba(74,222,128,0.3);">COMPLETED</span>';
+          }
+          html += '      <span class="risk-pill risk-' + escapeHtml(risk.risk_level || 'MODERATE') + '">' + escapeHtml(risk.risk_level || 'MODERATE') + ' RISK (' + (risk.risk_score !== undefined ? risk.risk_score : 50) + ')</span>';
           html += '      <span class="badge-tag">' + escapeHtml(rec.domain || 'Domain') + '</span>';
           html += '      <span class="badge-tag">' + escapeHtml(rec.jurisdiction || 'India') + '</span>';
-          html += '      <span class="badge-tag">' + (isSim ? 'Simulated Scenario' : 'Live Question Analysis') + '</span>';
+          html += '      <span class="badge-tag">' + escapeHtml(eventType) + '</span>';
+          html += '      <span class="badge-tag" style="color:' + (rec.provenance === 'LEGACY_UNVERIFIED' ? 'var(--strip)' : '#38bdf8') + ';">' + escapeHtml(rec.provenance === 'LEGACY_UNVERIFIED' ? 'Unverified Legacy Record' : 'Runtime Execution') + '</span>';
           html += '    </div>';
           html += '    <span style="font-size:12px;color:var(--strip);font-family:ui-monospace,monospace;">' + escapeHtml(dateStr) + '</span>';
           html += '  </div>';
-          html += '  <h2 style="font-size:clamp(22px,2.5vw,34px);font-weight:400;margin:12px 0 6px;">' + escapeHtml(rec.question) + '</h2>';
+          html += '  <h2 style="font-size:clamp(22px,2.5vw,34px);font-weight:400;margin:12px 0 6px;">' + escapeHtml(rec.question || 'Not recorded') + '</h2>';
           html += '</div>';
+
+          // Error / Failure banner if execution failed
+          if (execStatus === 'FAILED' && rec.error_details) {
+            html += '<div class="api-error" style="margin:0 0 24px;padding:16px;border-radius:8px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);">';
+            html += '  <b style="color:#f87171;font-size:14px;">EXECUTION FAILURE DETAILS</b>';
+            html += '  <p style="margin:6px 0 0;font-size:13px;color:var(--ink);font-family:ui-monospace,monospace;">' + escapeHtml(rec.error_details) + '</p>';
+            html += '</div>';
+          }
 
           // Simulated event banner if applicable
           if (isSim && rec.scenario) {
@@ -5023,12 +5296,16 @@
           html += '  <summary>1. Audit Identity &amp; Record Integrity</summary>';
           html += '  <div class="cmp" style="margin-top:16px;">';
           html += '    <div>';
-          html += '      <small>Audit Identifier</small><b>' + escapeHtml(rec.audit_id) + '</b>';
-          html += '      <p><i>Timestamp</i>' + escapeHtml(rec.timestamp) + '</p>';
-          html += '      <p><i>Pipeline Version</i>' + escapeHtml(rec.pipeline_version || 'hackgrid-evidence-pipeline-v1') + '</p>';
+          html += '      <small>Audit Identifier</small><b>' + escapeHtml(rec.audit_id || 'Not recorded') + '</b>';
+          html += '      <p><i>Execution / Run ID</i><code>' + escapeHtml(rec.execution_id || 'Not recorded') + '</code></p>';
+          html += '      <p><i>Event Type</i>' + escapeHtml(rec.event_type || rec.audit_type || 'QUESTION_ANALYSIS') + '</p>';
+          html += '      <p><i>Execution Status</i>' + escapeHtml(rec.execution_status || 'COMPLETED') + '</p>';
+          html += '      <p><i>Timestamp (UTC)</i>' + escapeHtml(rec.timestamp || 'Not recorded') + '</p>';
           html += '    </div>';
           html += '    <div>';
           html += '      <small>Model &amp; Security</small><b>' + escapeHtml(rec.model || 'openai/gpt-oss-120b') + '</b>';
+          html += '      <p><i>Pipeline Version</i>' + escapeHtml(rec.pipeline_version || 'hackgrid-evidence-pipeline-v1') + '</p>';
+          html += '      <p><i>Provenance Status</i>' + escapeHtml(rec.provenance === 'LEGACY_UNVERIFIED' ? 'Unverified Legacy Record' : 'Runtime Execution') + '</p>';
           html += '      <p><i>Integrity Status</i>Canonical SHA-256 Hash Verified &middot; Immutable JSONL Record</p>';
           html += '      <p><i>Storage File</i><code>Backend/audit/records/audit.jsonl</code></p>';
           html += '    </div>';
@@ -5046,11 +5323,23 @@
 
           if (synth.technical_implications && synth.technical_implications.length) {
             html += '<h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--strip);margin:16px 0 6px;">Technical Implications</h4>';
-            html += '<ul style="margin:0 0 16px 20px;color:var(--muted);line-height:1.6;">' + synth.technical_implications.map(function (t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') + '</ul>';
+            html += '<ul style="margin:0 0 16px 20px;color:var(--muted);line-height:1.6;">' + synth.technical_implications.map(function (t) {
+              if (typeof t === 'string') return '<li>' + escapeHtml(t) + '</li>';
+              var title = t.implication || t.statement || '';
+              var st = t.status ? ' [' + escapeHtml(t.status) + ']' : '';
+              var basis = t.basis ? ' — <i>' + escapeHtml(t.basis) + '</i>' : '';
+              return '<li style="margin-bottom:6px;"><strong>' + escapeHtml(title) + '</strong>' + st + basis + '</li>';
+            }).join('') + '</ul>';
           }
           if (synth.regulatory_implications && synth.regulatory_implications.length) {
             html += '<h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--strip);margin:16px 0 6px;">Regulatory Implications</h4>';
-            html += '<ul style="margin:0 0 16px 20px;color:var(--muted);line-height:1.6;">' + synth.regulatory_implications.map(function (r) { return '<li>' + escapeHtml(r) + '</li>'; }).join('') + '</ul>';
+            html += '<ul style="margin:0 0 16px 20px;color:var(--muted);line-height:1.6;">' + synth.regulatory_implications.map(function (r) {
+              if (typeof r === 'string') return '<li>' + escapeHtml(r) + '</li>';
+              var title = r.statement || r.implication || '';
+              var st = (r.mandatory_status || r.status) ? ' [' + escapeHtml(r.mandatory_status || r.status) + ']' : '';
+              var concl = r.conclusion ? ' — ' + escapeHtml(r.conclusion) : (r.basis ? ' — <i>' + escapeHtml(r.basis) + '</i>' : '');
+              return '<li style="margin-bottom:6px;"><strong>' + escapeHtml(title) + '</strong>' + st + concl + '</li>';
+            }).join('') + '</ul>';
           }
           if (synth.gaps && synth.gaps.length) {
             html += '<h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--strip);margin:16px 0 6px;">Identified Policy &amp; Standards Gaps</h4>';
@@ -5153,6 +5442,29 @@
           html += '    </div>';
           html += '  </div>';
           html += '</details>';
+
+          // Related Execution Events (if sibling events exist with same execution_id)
+          if (rec.related_events && rec.related_events.length > 0) {
+            html += '<details open style="margin-top:20px;">';
+            html += '  <summary>Linked Events in Execution (' + escapeHtml(rec.execution_id) + ' &mdash; ' + rec.related_events.length + ' Related Event' + (rec.related_events.length > 1 ? 's' : '') + ')</summary>';
+            html += '  <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px;">';
+            rec.related_events.forEach(function (rel) {
+              html += '<div style="background:rgba(255,255,255,0.02);border:1px solid var(--line);border-radius:8px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">';
+              html += '  <div>';
+              html += '    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+              html += '      <span class="audit-id-badge" style="font-size:12px;">' + escapeHtml(rel.audit_id || 'Not recorded') + '</span>';
+              html += '      <span class="badge-tag">' + escapeHtml(rel.event_type || rel.audit_type) + '</span>';
+              html += '      <span class="badge-tag">' + escapeHtml(rel.execution_status || 'COMPLETED') + '</span>';
+              html += '      <span style="font-size:12px;color:var(--strip);">' + escapeHtml(rel.timestamp ? new Date(rel.timestamp).toLocaleString() : '') + '</span>';
+              html += '    </div>';
+              html += '    <p style="margin:0;font-size:13px;color:var(--ink);">' + escapeHtml(rel.question || rel.assessment_excerpt || 'Event') + '</p>';
+              html += '  </div>';
+              html += '  <button type="button" class="btn" style="padding:6px 12px;font-size:12px;" onclick="viewAuditDetail(\'' + escapeHtml(rel.audit_id) + '\')">Inspect Event &rarr;</button>';
+              html += '</div>';
+            });
+            html += '  </div>';
+            html += '</details>';
+          }
 
           // 7. Human Review Status & Final Decision
           html += '<details open>';
@@ -5271,6 +5583,12 @@
           if ($('audit-filter-type')) $('audit-filter-type').value = 'all';
           if ($('audit-sort')) $('audit-sort').value = 'newest';
           loadAudits();
+        };
+      }
+      var aExport = $('audit-btn-export-excel');
+      if (aExport) {
+        aExport.onclick = function () {
+          window.location.href = '/api/audits/export/excel';
         };
       }
       var aBack = $('audit-btn-back');

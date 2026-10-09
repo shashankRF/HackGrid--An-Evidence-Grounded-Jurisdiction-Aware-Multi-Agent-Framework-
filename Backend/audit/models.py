@@ -17,6 +17,32 @@ class AuditRecord:
 
     model: str
 
+    execution_id: str | None = None
+
+    event_type: str = "QUESTION_ANALYSIS"
+
+    execution_status: str = "COMPLETED"
+
+    error_details: str | None = None
+
+    scenario_id: str | None = None
+
+    scenario_title: str | None = None
+
+    step_id: str | None = None
+
+    step_title: str | None = None
+
+    workflow_stages: List[str] = field(
+        default_factory=list
+    )
+
+    provenance: str = "RUNTIME_EXECUTION"
+
+    domain: str | None = None
+
+    jurisdiction: str | None = None
+
     retrieved_evidence: List[Dict[str, Any]] = field(
         default_factory=list
     )
@@ -71,6 +97,18 @@ class AuditRecord:
             "question": self.question,
             "pipeline_version": self.pipeline_version,
             "model": self.model,
+            "execution_id": self.execution_id,
+            "event_type": self.event_type,
+            "execution_status": self.execution_status,
+            "error_details": self.error_details,
+            "scenario_id": self.scenario_id,
+            "scenario_title": self.scenario_title,
+            "step_id": self.step_id,
+            "step_title": self.step_title,
+            "workflow_stages": self.workflow_stages,
+            "provenance": self.provenance,
+            "domain": self.domain,
+            "jurisdiction": self.jurisdiction,
             "retrieved_evidence": self.retrieved_evidence,
             "evidence_classification": self.evidence_classification,
             "evidence_assessment": self.evidence_assessment,
@@ -105,6 +143,8 @@ class ReviewEvent:
 
     final_decision: str
 
+    execution_id: str | None = None
+
     reviewer: str = "Human reviewer"
 
     reviewer_modifications: str | None = None
@@ -118,7 +158,8 @@ class ReviewEvent:
             "timestamp": self.timestamp,
             "human_action": self.human_action,
             "final_decision": self.final_decision,
+            "execution_id": self.execution_id,
             "reviewer": self.reviewer,
             "reviewer_modifications": self.reviewer_modifications,
             "reviewer_reason": self.reviewer_reason,
-        }
+        }

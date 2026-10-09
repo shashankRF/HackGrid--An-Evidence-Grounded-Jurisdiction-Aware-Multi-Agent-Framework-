@@ -1,4 +1,8 @@
-from typing import Any, Dict, List
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+from typing import Any, Dict, List, Optional
 
 try:
     from FlagEmbedding import FlagReranker
@@ -43,6 +47,7 @@ class EvidenceReranker:
         query: str,
         candidates: List[Dict[str, Any]],
         top_k: int = 8,
+        max_length: int = 128,
     ) -> List[Dict[str, Any]]:
 
         if not query or not query.strip():
@@ -51,19 +56,31 @@ class EvidenceReranker:
         if not candidates:
             return []
 
-        if self.reranker is not None:
-            pairs = [
-                [
-                    query,
-                    candidate["text"],
-                ]
-                for candidate in candidates
-            ]
+        if len(candidates) == 1:
+            item = dict(candidates[0])
+            item["reranker_score"] = float(item.get("similarity", 0.9))
+            item["original_rank"] = int(item.get("rank", 1))
+            item["rerank_rank"] = 1
+            return [item]
 
-            scores = self.reranker.compute_score(
-                pairs,
-                normalize=True,
-            )
+        if self.reranker is not None:
+            try:
+                pairs = [
+                    [
+                        query,
+                        candidate.get("text", "")[:800],
+                    ]
+                    for candidate in candidates
+                ]
+
+                scores = self.reranker.compute_score(
+                    pairs,
+                    max_length=max_length,
+                    normalize=True,
+                )
+            except Exception as exc:
+                print(f"[EvidenceReranker] Warning: compute_score failed ({exc}). Using similarity fallback.")
+                scores = [candidate.get("similarity", 1.0 / (idx + 1)) for idx, candidate in enumerate(candidates)]
 
             if isinstance(scores, float):
                 scores = [scores]

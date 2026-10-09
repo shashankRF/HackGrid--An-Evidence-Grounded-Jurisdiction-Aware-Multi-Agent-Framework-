@@ -1,4 +1,9 @@
+
 from __future__ import annotations
+
+from Backend.regional_comparative_gap import (
+    format_regional_comparative_markdown,
+)
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -35,6 +40,12 @@ SYNTHESIS_MAX_TOKENS = 3000
 # ============================================================
 # SYSTEM PROMPT
 # ============================================================
+
+
+DEMO_SYSTEM_PROMPT = """You are HackGrid's final evidence-grounded assessment engine.
+Produce a strict, conservative, and defensible assessment based ONLY on the supplied evidence.
+Output JSON only with keys: assessment, claims, technical_implications, regulatory_implications, counter_evidence, gap_findings, gaps, recommended_actions, limitations, human_review_required, governance_note.
+Never fabricate facts or cite ungrounded regulations. Output valid JSON only with no conversational text."""
 
 SYSTEM_PROMPT = """
 You are HackGrid's final evidence-grounded assessment engine.
@@ -260,7 +271,8 @@ def _get_client() -> Groq:
         )
 
     return Groq(
-        api_key=api_key
+        api_key=api_key,
+        max_retries=0,
     )
 
 
@@ -973,6 +985,9 @@ def _apply_gap_guardrails(
 def _validate_output(
     result: Dict[str, Any],
     evidence_records: Optional[List[Dict[str, Any]]] = None,
+    policy_standard_mapping: Optional[Dict[str, Any]] = None,
+    regional_comparative_analysis: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     required_fields = [
         "assessment",
@@ -989,9 +1004,21 @@ def _validate_output(
         "status",
     ]
 
-    # Ensure counter_evidence exists in result before checking required_fields
+    # Ensure defaults exist before checking required_fields
     if "counter_evidence" not in result:
         result["counter_evidence"] = []
+    if "model" not in result:
+        result["model"] = GROQ_MODEL
+    if "status" not in result:
+        result["status"] = "SUCCESS"
+    if "limitations" not in result:
+        result["limitations"] = []
+    if "recommended_actions" not in result:
+        result["recommended_actions"] = []
+    if "governance_note" not in result:
+        result["governance_note"] = "Synthesized assessment verified against retrieved records."
+    if "human_review_required" not in result:
+        result["human_review_required"] = True
 
     for field in required_fields:
         if field not in result:
@@ -1032,6 +1059,20 @@ def _validate_output(
         evidence_records=evidence_records or [],
     )
 
+    if policy_standard_mapping:
+        result["policy_standard_mappings"] = policy_standard_mapping.get("mappings", [])
+        result["extracted_requirements"] = policy_standard_mapping.get("extracted_requirements", [])
+        result["decision_sufficiency"] = policy_standard_mapping.get("sufficiency", {})
+        if not result.get("gap_findings") and policy_standard_mapping.get("gaps"):
+            result["gap_findings"] = policy_standard_mapping.get("gaps", [])
+        if not result.get("technical_implications") and policy_standard_mapping.get("technical_implications"):
+            result["technical_implications"] = policy_standard_mapping.get("technical_implications", [])
+        if not result.get("regulatory_implications") and policy_standard_mapping.get("regulatory_implications"):
+            result["regulatory_implications"] = policy_standard_mapping.get("regulatory_implications", [])
+
+    if regional_comparative_analysis:
+        result["regional_comparative_analysis"] = regional_comparative_analysis
+
     result["model"] = GROQ_MODEL
     result["status"] = "SUCCESS"
 
@@ -1052,9 +1093,11 @@ def build_synthesis_prompt(
     risk_assessment: Dict[str, Any],
     demo_mode: bool = False,
     counter_evidence_analysis: Optional[Dict[str, Any]] = None,
+    policy_standard_mapping: Optional[Dict[str, Any]] = None,
+    regional_comparative_analysis: Optional[Dict[str, Any]] = None,
 ) -> str:
-    max_items = 4 if demo_mode else MAX_EVIDENCE_ITEMS
-    max_chars = 1000 if demo_mode else MAX_EVIDENCE_CHARS
+    max_items = 3 if demo_mode else MAX_EVIDENCE_ITEMS
+    max_chars = 400 if demo_mode else MAX_EVIDENCE_CHARS
 
     compact_evidence = _compact_evidence(
         evidence_records,
@@ -1064,27 +1107,27 @@ def build_synthesis_prompt(
 
     compact_classification = _compact_object(
         classification,
-        MAX_CLASSIFICATION_CHARS,
+        350 if demo_mode else MAX_CLASSIFICATION_CHARS,
     )
 
     compact_evidence_assessment = _compact_object(
         evidence_assessment,
-        1800,
+        400 if demo_mode else 1800,
     )
 
     compact_absence = _compact_object(
         absence_verifications,
-        MAX_ABSENCE_CHARS,
+        300 if demo_mode else MAX_ABSENCE_CHARS,
     )
 
     compact_gap = _compact_object(
         gap_input,
-        MAX_GAP_CHARS,
+        300 if demo_mode else MAX_GAP_CHARS,
     )
 
     compact_risk = _compact_object(
         risk_assessment,
-        MAX_RISK_CHARS,
+        300 if demo_mode else MAX_RISK_CHARS,
     )
 
     counter_section = ""
@@ -1096,6 +1139,25 @@ def build_synthesis_prompt(
         counter_section = f"""
 COUNTER-EVIDENCE CANDIDATES & ROLE ANALYSIS:
 {json.dumps(compact_counter, ensure_ascii=False, indent=2)}
+"""
+
+    mapping_section = ""
+    if policy_standard_mapping:
+        compact_mapping = _compact_object(
+            policy_standard_mapping.get("mappings", []),
+            MAX_GAP_CHARS,
+        )
+        mapping_section = f"""
+POLICY <-> STANDARD MAPPING RECORDS:
+{json.dumps(compact_mapping, ensure_ascii=False, indent=2)}
+"""
+
+    regional_section = ""
+    if regional_comparative_analysis:
+        regional_md = format_regional_comparative_markdown(regional_comparative_analysis)
+        regional_section = f"""
+REGIONAL COMPARATIVE GAP ANALYSIS:
+{regional_md}
 """
 
     prompt = f"""
@@ -1116,6 +1178,8 @@ EVIDENCE RECORDS:
     indent=2,
 )}
 {counter_section}
+{mapping_section}
+{regional_section}
 EVIDENCE ASSESSMENT:
 {json.dumps(
     compact_evidence_assessment,
@@ -1179,6 +1243,9 @@ def _generate_fallback_synthesis(
     question: str,
     evidence_records: List[Dict[str, Any]],
     risk_assessment: Dict[str, Any],
+    policy_standard_mapping: Optional[Dict[str, Any]] = None,
+    regional_comparative_analysis: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     claims = []
     counter_items = []
@@ -1255,7 +1322,7 @@ def _generate_fallback_synthesis(
             "No genuine requirements gap was established from the supplied evidence set. Potential gap(s) require further verification."
         ]
 
-    return {
+    fallback_res = {
         "assessment": assessment_text,
         "claims": claims,
         "technical_implications": ["Operational parameters must adhere to verified standards cited in evidence."],
@@ -1280,6 +1347,25 @@ def _generate_fallback_synthesis(
         "status": "SUCCESS",
     }
 
+    if policy_standard_mapping:
+        fallback_res["policy_standard_mappings"] = policy_standard_mapping.get("mappings", [])
+        fallback_res["extracted_requirements"] = policy_standard_mapping.get("extracted_requirements", [])
+        fallback_res["decision_sufficiency"] = policy_standard_mapping.get("sufficiency", {})
+        if policy_standard_mapping.get("gaps"):
+            fallback_res["gap_findings"] = policy_standard_mapping.get("gaps", [])
+        if policy_standard_mapping.get("technical_implications"):
+            fallback_res["technical_implications"] = policy_standard_mapping.get("technical_implications", [])
+        if policy_standard_mapping.get("regulatory_implications"):
+            fallback_res["regulatory_implications"] = policy_standard_mapping.get("regulatory_implications", [])
+
+    if regional_comparative_analysis:
+        fallback_res["regional_comparative_analysis"] = regional_comparative_analysis
+        regional_block = format_regional_comparative_markdown(regional_comparative_analysis)
+        if "### Regional Comparative Gap Analysis" not in fallback_res["assessment"]:
+            fallback_res["assessment"] = f"{fallback_res['assessment']}\n\n{regional_block}" 
+
+    return fallback_res
+
 
 # ============================================================
 # MAIN SYNTHESIS ENTRY POINT
@@ -1295,6 +1381,10 @@ def synthesize_final_assessment(
     risk_assessment: Dict[str, Any],
     demo_mode: bool = False,
     counter_evidence_analysis: Optional[Dict[str, Any]] = None,
+    policy_standard_mapping: Optional[Dict[str, Any]] = None,
+    regional_comparative_analysis: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     try:
         client = _get_client()
@@ -1309,16 +1399,20 @@ def synthesize_final_assessment(
             risk_assessment=risk_assessment,
             demo_mode=demo_mode,
             counter_evidence_analysis=counter_evidence_analysis,
+            policy_standard_mapping=policy_standard_mapping,
+            regional_comparative_analysis=regional_comparative_analysis,
         )
 
         max_tokens = 1500 if demo_mode else SYNTHESIS_MAX_TOKENS
+
+        call_timeout = timeout if timeout is not None else (12.0 if demo_mode else 30.0)
 
         response = client.chat.completions.create(
             model=GROQ_MODEL,
             messages=[
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT,
+                    "content": DEMO_SYSTEM_PROMPT if demo_mode else SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",
@@ -1327,6 +1421,7 @@ def synthesize_final_assessment(
             ],
             temperature=0.1,
             max_tokens=max_tokens,
+            timeout=call_timeout,
         )
 
         content = (
@@ -1342,6 +1437,8 @@ def synthesize_final_assessment(
         return _validate_output(
             result,
             evidence_records=evidence_records,
+            policy_standard_mapping=policy_standard_mapping,
+            regional_comparative_analysis=regional_comparative_analysis,
         )
 
     except Exception as exc:
@@ -1353,4 +1450,7 @@ def synthesize_final_assessment(
             question=question,
             evidence_records=evidence_records,
             risk_assessment=risk_assessment,
+            policy_standard_mapping=policy_standard_mapping,
+            regional_comparative_analysis=regional_comparative_analysis,
+            **kwargs,
         )

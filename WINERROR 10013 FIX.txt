@@ -26,3 +26,11 @@ python -m uvicorn Backend.server:app --host 127.0.0.1 --port 8000 --reload
 At last start frontend:
 
 python -m http.server 5500
+
+
+
+
+
+
+Invoke-WebRequest http://127.0.0.1:8000/docs -UseBasicParsing
+for testing connection 
